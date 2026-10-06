@@ -1,0 +1,1434 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>스마트 창문</title>
+  <!-- Pretendard (한글 폰트) -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css" />
+  <!-- 테마: 저장된 선택 > 폰/PC 설정 순서. CSS보다 먼저 정해서 화면이 번쩍이지 않게 -->
+  <script>
+    (function(){
+      var t = null;
+      try { t = localStorage.getItem('theme'); } catch(e) {}
+      if(t !== 'light' && t !== 'dark') t = matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+      document.documentElement.dataset.theme = t;
+    })();
+  </script>
+  <link rel="stylesheet" href="/static/style.css" />
+  <!--차트 추가-->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+  <!-- 네이버 지도 API (본인 키로 교체) -->
+  <script type="text/javascript"
+    src="https://oapi.map.naver.com/openapi/v3/maps.js?ncpKeyId=4147wg8rt5">
+  </script>
+</head>
+<body>
+
+<!-- 아이콘 모음 (Lucide 기반 SVG) -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <symbol id="i-pin" viewBox="0 0 24 24"><path d="M20 10c0 4.993-5.539 10.193-7.399 11.799a1 1 0 0 1-1.202 0C9.539 20.193 4 14.993 4 10a8 8 0 0 1 16 0"/><circle cx="12" cy="10" r="3"/></symbol>
+    <symbol id="i-chevron" viewBox="0 0 24 24"><path d="m9 18 6-6-6-6"/></symbol>
+    <symbol id="i-x" viewBox="0 0 24 24"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></symbol>
+    <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></symbol>
+    <symbol id="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/></symbol>
+    <symbol id="i-moon" viewBox="0 0 24 24"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></symbol>
+    <symbol id="i-cloud" viewBox="0 0 24 24"><path d="M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z"/></symbol>
+    <symbol id="i-rain" viewBox="0 0 24 24"><path d="M4 14.899A7 7 0 1 1 15.71 8h1.79a4.5 4.5 0 0 1 2.5 8.242"/><path d="M16 14v6"/><path d="M8 14v6"/><path d="M12 16v6"/></symbol>
+    <symbol id="i-snow" viewBox="0 0 24 24"><path d="M12 2v20"/><path d="M2 12h20"/><path d="m4.93 4.93 14.14 14.14"/><path d="m19.07 4.93-14.14 14.14"/></symbol>
+    <symbol id="i-wind" viewBox="0 0 24 24"><path d="M17.7 7.7a2.5 2.5 0 1 1 1.8 4.3H2"/><path d="M9.6 4.6A2 2 0 1 1 11 8H2"/><path d="M12.6 19.4A2 2 0 1 0 14 16H2"/></symbol>
+    <symbol id="i-leaf" viewBox="0 0 24 24"><path d="M11 20A7 7 0 0 1 9.8 6.1C15.5 5 17 4.48 19 2c1 2 2 4.18 2 8 0 5.5-4.78 10-10 10Z"/><path d="M2 21c0-3 1.85-5.36 5.08-6C9.5 14.52 12 13 13 12"/></symbol>
+    <symbol id="i-dust" viewBox="0 0 24 24"><circle cx="7" cy="8" r="2"/><circle cx="16.5" cy="6.5" r="1.5"/><circle cx="14.5" cy="15" r="2.5"/><circle cx="6" cy="17" r="1.5"/></symbol>
+    <symbol id="i-check" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></symbol>
+    <symbol id="i-alert" viewBox="0 0 24 24"><path d="M12 7v6"/><path d="M12 17h.01"/></symbol>
+    <symbol id="i-minus" viewBox="0 0 24 24"><path d="M6 12h12"/></symbol>
+    <symbol id="i-up" viewBox="0 0 24 24"><path d="M7 17 17 7"/><path d="M8 7h9v9"/></symbol>
+    <symbol id="i-home" viewBox="0 0 24 24"><path d="M15 21v-8a1 1 0 0 0-1-1h-4a1 1 0 0 0-1 1v8"/><path d="M3 10a2 2 0 0 1 .709-1.528l7-5.999a2 2 0 0 1 2.582 0l7 5.999A2 2 0 0 1 21 10v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></symbol>
+  </defs>
+</svg>
+
+<div class="app">
+
+  <!-- ── 상단: navbar + 탭 ───────────────────────── -->
+  <header class="appbar">
+    <div class="navbar">
+      <div class="brand">
+        <h1>스마트 창문</h1>
+        <!-- 라즈베리파이 연결 상태 -->
+        <div class="conn" id="conn" data-state="waiting">
+          <span class="conn-dot"></span><span id="connText">라즈베리파이를 기다리는 중</span>
+        </div>
+      </div>
+      <nav class="nav-actions">
+        <!-- 현재 위치 -->
+        <button class="nav-btn" onclick="openMapSheet()" aria-label="현재 위치 수정">
+          <svg class="ic ic-sm"><use href="#i-pin"/></svg>
+          <span class="nav-loc" id="locationLabel">위치</span>
+        </button>
+        <!-- 자동/수동 토글: 지금 모드를 보여주고, 누르면 반대 모드로 -->
+        <button class="mode-toggle" id="modeToggle" data-mode="auto" onclick="toggleMode()" aria-label="자동/수동 모드 전환">
+          <span class="mt-track"><span class="mt-knob"></span></span>
+          <span class="mt-label" id="modeLabel">자동</span>
+        </button>
+        <!-- 활동 기록 -->
+        <button class="nav-icon" onclick="openSheet('eventsSheet')" aria-label="활동 기록">
+          <svg class="ic"><use href="#i-clock"/></svg>
+        </button>
+        <!-- 테마: 밝은 테마면 달(누르면 어둡게), 어두운 테마면 해(누르면 밝게) -->
+        <button class="nav-icon" id="themeBtn" onclick="toggleTheme()" aria-label="어두운 테마로 바꾸기">
+          <svg class="ic"><use id="themeIcon" href="#i-moon"/></svg>
+        </button>
+      </nav>
+    </div>
+
+    <!-- 페이지 탭 (모바일: 스와이프와 연동) -->
+    <div class="tabs" id="tabs" role="tablist">
+      <button class="tab active" role="tab" onclick="goPage(0)">창문</button>
+      <button class="tab" role="tab" onclick="goPage(1)">공기</button>
+      <button class="tab" role="tab" onclick="goPage(2)">추이</button>
+      <span class="tab-ind" id="tabInd"></span>
+    </div>
+  </header>
+
+  <!-- ── 스와이프 페이지 ─────────────────────────── -->
+  <main class="pager" id="pager">
+
+    <!-- 1. 창문 -->
+    <section class="page page-window">
+      <div class="card hero" id="hero" data-status="loading">
+        <!-- 창문 일러스트: 오른쪽 창짝이 상태에 따라 밀려요 -->
+        <svg class="win-art" viewBox="0 0 132 112" aria-hidden="true">
+          <rect class="win-frame" x="4" y="4" width="124" height="104" rx="10"/>
+          <rect class="win-sky" x="12" y="12" width="108" height="88" rx="4"/>
+          <g class="win-breeze">
+            <path d="M74 40h26a5 5 0 1 0-5-5"/>
+            <path d="M70 56h36"/>
+            <path d="M76 72h20a5 5 0 1 1-5 5"/>
+          </g>
+          <g class="win-sash">
+            <rect class="sash" x="12" y="12" width="54" height="88" rx="3"/>
+            <rect class="glass" x="18" y="18" width="42" height="76" rx="2"/>
+          </g>
+          <g class="win-sash win-sash-r">
+            <rect class="sash" x="66" y="12" width="54" height="88" rx="3"/>
+            <rect class="glass" x="72" y="18" width="42" height="76" rx="2"/>
+            <rect class="handle" x="75" y="49" width="3" height="14" rx="1.5"/>
+          </g>
+        </svg>
+
+        <span class="status-chip" id="heroChip">불러오는 중</span>
+        <h2 class="hero-title" id="heroTitle">창문 상태를 확인하고 있어요</h2>
+        <p class="hero-reason" id="heroReason">잠시만 기다려 주세요</p>
+        <p class="hero-meta" id="heroMeta"></p>
+
+        <!-- 판단 근거는 눌렀을 때만 (시트) -->
+        <button class="why-btn" id="whyBtn" onclick="openSheet('checksSheet')" hidden>
+          <span id="whyLabel">왜 열렸나요?</span>
+          <svg class="ic ic-sm"><use href="#i-chevron"/></svg>
+        </button>
+      </div>
+
+      <!-- 모바일: 옆 페이지가 있다는 안내 -->
+      <button class="swipe-hint" onclick="goPage(1)">
+        옆으로 넘기면 공기 상태를 볼 수 있어요
+        <svg class="ic ic-xs"><use href="#i-chevron"/></svg>
+      </button>
+    </section>
+
+    <!-- 2. 공기 -->
+    <section class="page page-air">
+      <div class="section-head">
+        <h3 class="section-title">현재 바깥/실내 공기</h3>
+      </div>
+      <div class="tiles">
+        <button class="tile" onclick="openDetail('weather')">
+          <div class="tile-head">
+            <span class="tile-icon" id="weatherIcon"><svg class="ic"><use href="#i-sun"/></svg></span>
+          </div>
+          <div class="tile-label">바깥 날씨</div>
+          <div class="tile-value" id="tv_weather">-</div>
+          <div class="tile-sub" id="ts_weather">-</div>
+          <svg class="ic tile-go" aria-hidden="true"><use href="#i-chevron"/></svg>
+        </button>
+
+        <button class="tile" onclick="openDetail('air')">
+          <div class="tile-head">
+            <span class="tile-icon"><svg class="ic"><use href="#i-wind"/></svg></span>
+            <span class="chip" id="tc_air"></span>
+          </div>
+          <div class="tile-label">바깥 초미세먼지</div>
+          <div class="tile-value" id="tv_air">-</div>
+          <div class="tile-sub" id="ts_air">-</div>
+          <svg class="ic tile-go" aria-hidden="true"><use href="#i-chevron"/></svg>
+        </button>
+
+        <button class="tile" id="tileCo2" onclick="openDetail('indoor')">
+          <div class="tile-head">
+            <span class="tile-icon"><svg class="ic"><use href="#i-leaf"/></svg></span>
+            <span class="chip" id="tc_co2"></span>
+          </div>
+          <div class="tile-label">실내 이산화탄소</div>
+          <div class="tile-value" id="tv_co2">-</div>
+          <div class="tile-sub" id="ts_co2">-</div>
+          <svg class="ic tile-go" aria-hidden="true"><use href="#i-chevron"/></svg>
+        </button>
+
+        <button class="tile" id="tileInpm" onclick="openDetail('indoor')">
+          <div class="tile-head">
+            <span class="tile-icon"><svg class="ic"><use href="#i-dust"/></svg></span>
+            <span class="chip" id="tc_inpm"></span>
+          </div>
+          <div class="tile-label">실내 초미세먼지</div>
+          <div class="tile-value" id="tv_inpm">-</div>
+          <div class="tile-sub" id="ts_inpm">-</div>
+          <svg class="ic tile-go" aria-hidden="true"><use href="#i-chevron"/></svg>
+        </button>
+      </div>
+    </section>
+
+    <!-- 3. 추이 -->
+    <section class="page page-chart">
+      <div class="card chart-card">
+      <div class="chart-head">
+        <div>
+          <h3 class="card-title">실내 공기 추이</h3>
+          <p class="card-desc" id="chartDesc">-</p>
+        </div>
+        <div class="chart-now">
+          <div class="chart-now-label">지금</div>
+          <div class="chart-now-val" id="chartNowVal">-</div>
+          <span class="chip" id="chartNowChip"></span>
+        </div>
+      </div>
+
+      <div class="chart-controls">
+        <div class="pills" id="metricPills">
+          <button class="pill active" data-metric="overall" onclick="switchChartMetric(this)">종합</button>
+          <button class="pill" data-metric="pm25" onclick="switchChartMetric(this)">초미세먼지</button>
+          <button class="pill" data-metric="pm10" onclick="switchChartMetric(this)">미세먼지</button>
+          <button class="pill" data-metric="co2" onclick="switchChartMetric(this)">이산화탄소</button>
+          <button class="pill" data-metric="compare" onclick="switchChartMetric(this)">실내·바깥 초미세먼지 비교</button>
+        </div>
+        <div class="segmented segmented-sm" id="hoursSeg">
+          <button class="active" data-hours="1" onclick="switchChartHours(this)">1시간</button>
+          <button data-hours="6" onclick="switchChartHours(this)">6시간</button>
+          <button data-hours="24" onclick="switchChartHours(this)">24시간</button>
+        </div>
+      </div>
+
+      <div class="chart-wrapper">
+        <canvas id="indoorChart"></canvas>
+        <div class="chart-empty" id="chartEmpty" hidden>
+          아직 데이터가 없어요<br>라즈베리파이에서 센서 값이 들어오면 보여드릴게요
+        </div>
+      </div>
+
+      <div class="legend">
+        <span class="series" id="seriesLegend" hidden>
+          <span><i class="ln"></i>실내</span>
+          <span><i class="ln dash"></i>바깥</span>
+        </span>
+        <span><i class="sw good"></i>좋음</span>
+        <span><i class="sw normal"></i>보통</span>
+        <span><i class="sw bad"></i>나쁨</span>
+        <span><i class="sw vbad"></i>매우나쁨</span>
+      </div>
+      </div>
+    </section>
+
+  </main>
+</div>
+
+<!-- ── 수동 모드일 때 아래에서 올라오는 조작 패널 ── -->
+<div class="dock" id="dock" aria-hidden="true">
+  <div class="dock-panel">
+    <div class="dock-head">
+      <span class="dock-title">직접 조작</span>
+      <span class="dock-sub">수동 모드</span>
+    </div>
+    <!-- 타이머 (활성 시에만 표시) -->
+    <div class="timer-bar" id="timerBar" hidden>
+      <svg class="ic"><use href="#i-clock"/></svg>
+      <div class="timer-text"><strong id="timerRemaining">--:--</strong> 뒤에 자동으로 닫혀요</div>
+      <div class="timer-actions">
+        <button class="btn-sm" onclick="extendTimer(600)">+10분</button>
+        <button class="btn-sm" onclick="cancelTimer()">끄기</button>
+      </div>
+    </div>
+    <div class="btn-pair">
+      <button class="btn btn-primary" id="btnOpen" onclick="openSheet('timerSheet')" disabled>창문 열기</button>
+      <button class="btn btn-gray" id="btnClose" onclick="controlWindow('closed')" disabled>창문 닫기</button>
+    </div>
+  </div>
+</div>
+
+<!-- 판단 근거 시트 -->
+<div class="sheet-backdrop" id="checksSheet" onclick="backdropClose(event)">
+  <div class="sheet" role="dialog" aria-modal="true" aria-labelledby="checksTitle">
+    <div class="sheet-handle"></div>
+    <div class="sheet-head">
+      <h2 id="checksTitle">이렇게 판단했어요</h2>
+      <button class="icon-btn" onclick="closeSheet('checksSheet')" aria-label="닫기"><svg class="ic"><use href="#i-x"/></svg></button>
+    </div>
+    <p class="sheet-desc" id="checksMeta"></p>
+    <ul class="check-list" id="checksList"></ul>
+    <p class="checks-note" id="checksNote" hidden></p>
+    <p class="checks-raw" id="checksRaw"></p>
+  </div>
+</div>
+
+<!-- 상세 정보 시트 -->
+<div class="sheet-backdrop" id="detailSheet" onclick="backdropClose(event)">
+  <div class="sheet" role="dialog" aria-modal="true" aria-labelledby="detailTitle">
+    <div class="sheet-handle"></div>
+    <div class="sheet-head">
+      <h2 id="detailTitle">상세 정보</h2>
+      <button class="icon-btn" onclick="closeSheet('detailSheet')" aria-label="닫기"><svg class="ic"><use href="#i-x"/></svg></button>
+    </div>
+    <div id="detailBody"></div>
+  </div>
+</div>
+
+<!-- 활동 기록 전체 시트 -->
+<div class="sheet-backdrop" id="eventsSheet" onclick="backdropClose(event)">
+  <div class="sheet" role="dialog" aria-modal="true" aria-labelledby="eventsTitle">
+    <div class="sheet-handle"></div>
+    <div class="sheet-head">
+      <h2 id="eventsTitle">활동 기록</h2>
+      <button class="icon-btn" onclick="closeSheet('eventsSheet')" aria-label="닫기"><svg class="ic"><use href="#i-x"/></svg></button>
+    </div>
+    <p class="sheet-desc">창문이 언제, 왜 열리고 닫혔는지 최근 30개까지 보여줘요</p>
+    <ul class="timeline" id="eventFullList"></ul>
+  </div>
+</div>
+
+<!-- 타이머 선택 시트 -->
+<div class="sheet-backdrop" id="timerSheet" onclick="backdropClose(event)">
+  <div class="sheet" role="dialog" aria-modal="true" aria-labelledby="timerTitle">
+    <div class="sheet-handle"></div>
+    <div class="sheet-head">
+      <h2 id="timerTitle">얼마나 열어둘까요?</h2>
+      <button class="icon-btn" onclick="closeSheet('timerSheet')" aria-label="닫기"><svg class="ic"><use href="#i-x"/></svg></button>
+    </div>
+    <p class="sheet-desc">시간이 지나면 자동으로 닫아드려요</p>
+    <div class="duration-grid">
+      <button class="duration-btn" onclick="startTimer(60)"><div class="label">1분</div><div class="desc">잠깐 환기</div></button>
+      <button class="duration-btn" onclick="startTimer(1800)"><div class="label">30분</div><div class="desc">짧은 환기</div></button>
+      <button class="duration-btn" onclick="startTimer(3600)"><div class="label">1시간</div><div class="desc">충분한 환기</div></button>
+      <button class="duration-btn" onclick="startTimer(10800)"><div class="label">3시간</div><div class="desc">긴 환기</div></button>
+      <button class="duration-btn" onclick="startTimer(21600)"><div class="label">6시간</div><div class="desc">장시간</div></button>
+      <button class="duration-btn" onclick="startTimer(43200)"><div class="label">12시간</div><div class="desc">반나절</div></button>
+    </div>
+    <button class="btn btn-primary btn-block" onclick="startTimer(0)">닫을 때까지 계속 열기</button>
+  </div>
+</div>
+
+<!-- 위치 설정 시트 -->
+<div class="sheet-backdrop" id="mapSheet" onclick="backdropClose(event)">
+  <div class="sheet sheet-wide" role="dialog" aria-modal="true" aria-labelledby="mapTitle">
+    <div class="sheet-handle"></div>
+    <div class="sheet-head">
+      <h2 id="mapTitle">현재 위치 수정</h2>
+      <button class="icon-btn" onclick="closeSheet('mapSheet')" aria-label="닫기"><svg class="ic"><use href="#i-x"/></svg></button>
+    </div>
+    <p class="sheet-desc">
+      지금은 <strong id="mapCurrentStation">-</strong> 기준으로 날씨와 공기 정보를 보여주고 있어요.<br>
+      지도를 눌러 창문이 있는 곳을 골라 주세요.
+    </p>
+    <div id="naverMap"></div>
+    <div class="map-selected">
+      <div class="label">선택한 위치</div>
+      <div class="coord" id="selectedCoordText">지도를 눌러 주세요</div>
+    </div>
+    <div class="btn-pair">
+      <button class="btn btn-gray" onclick="closeSheet('mapSheet')">취소</button>
+      <button class="btn btn-primary" id="saveLocationBtn" onclick="saveLocation()" disabled>이 위치로 저장</button>
+    </div>
+  </div>
+</div>
+
+<!-- 확인 시트 (confirm 대체) -->
+<div class="sheet-backdrop" id="confirmSheet" onclick="backdropClose(event)">
+  <div class="sheet sheet-narrow" role="alertdialog" aria-modal="true" aria-labelledby="confirmTitle">
+    <div class="sheet-handle"></div>
+    <h2 class="confirm-title" id="confirmTitle">확인</h2>
+    <p class="sheet-desc" id="confirmDesc"></p>
+    <div class="btn-pair">
+      <button class="btn btn-gray" onclick="answerConfirm(false)">취소</button>
+      <button class="btn btn-primary" id="confirmOk" onclick="answerConfirm(true)">확인</button>
+    </div>
+  </div>
+</div>
+
+<!-- 토스트 (alert 대체) -->
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+<script>
+// ════════════════════════════════════════════════════
+// 헬퍼 함수
+// ════════════════════════════════════════════════════
+const $ = id => document.getElementById(id);
+const has = v => v !== null && v !== undefined;
+const fmt = (v, d=1) => has(v) ? Number(v).toFixed(d) : '-';
+const mapPrec = v => ({none:'없음', rain:'비', rain_snow:'비/눈', snow:'눈', drizzle:'빗방울'}[v] || '-');
+const mapSky  = v => ({clear:'맑음', cloudy:'구름많음', overcast:'흐림'}[v] || '-');
+// 강수 있으면 강수를, 없으면 하늘상태를 표시
+const skyOrPrec = w => (w.precipitation && w.precipitation !== 'none') ? mapPrec(w.precipitation) : mapSky(w.sky);
+// "YYYY-MM-DD HH:MM:SS" → "HH:MM"
+const timeOf = ts => ts ? (ts.split(' ')[1] || ts).substring(0, 5) : '-';
+const icon = name => `<svg class="ic"><use href="#i-${name}"/></svg>`;
+const escapeHTML = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+// 서버 사유 앞의 이모지(⏰ 등)는 떼고 보여줌
+const cleanReason = r => (r || '').replace(/^\p{Extended_Pictographic}️?\s*/u, '').trim();
+// 서버 시각 문자열 → ms (서버 시각끼리만 비교하므로 브라우저 시간대와 무관)
+const tsMs = ts => ts ? new Date(ts.replace(' ', 'T')).getTime() : NaN;
+const pad2 = n => String(n).padStart(2, '0');
+const hhmm = ms => { const d = new Date(ms); return `${pad2(d.getHours())}:${pad2(d.getMinutes())}`; };
+function agoText(sec){
+  if(sec < 5) return '방금';
+  if(sec < 60) return `${Math.round(sec)}초 전`;
+  if(sec < 3600) return `${Math.floor(sec / 60)}분 전`;
+  if(sec < 86400) return `${Math.floor(sec / 3600)}시간 전`;
+  return `${Math.floor(sec / 86400)}일 전`;
+}
+
+function weatherIconName(w){
+  const p = w.precipitation;
+  if(p === 'snow') return 'snow';
+  if(p && p !== 'none') return 'rain';
+  if(w.sky === 'cloudy' || w.sky === 'overcast') return 'cloud';
+  return 'sun';
+}
+
+// 등급 평가
+function gradePM10(v){
+  if(!has(v)) return 'unknown';
+  if(v<=30) return 'good'; if(v<=80) return 'normal';
+  if(v<=150) return 'bad'; return 'vbad';
+}
+function gradePM25(v){
+  if(!has(v)) return 'unknown';
+  if(v<=15) return 'good'; if(v<=35) return 'normal';
+  if(v<=75) return 'bad'; return 'vbad';
+}
+function gradeCO2(v){
+  if(!has(v)) return 'unknown';
+  if(v<=700) return 'good'; if(v<=1000) return 'normal';
+  if(v<=2000) return 'bad'; return 'vbad';
+}
+function gradeWind(v){
+  if(!has(v)) return 'unknown';
+  if(v<3) return 'good'; if(v<5) return 'normal'; return 'bad';
+}
+const GRADES = ['good', 'normal', 'bad', 'vbad'];
+const gradeLabel = { good:'좋음', normal:'보통', bad:'나쁨', vbad:'매우나쁨', unknown:'-' };
+
+// 여러 등급 중 가장 나쁜 것 (모두 모르면 unknown)
+function worstGrade(grades){
+  let worst = 'unknown';
+  for(const g of grades){
+    if(g === 'unknown') continue;
+    if(worst === 'unknown' || GRADES.indexOf(g) > GRADES.indexOf(worst)) worst = g;
+  }
+  return worst;
+}
+
+function chip(grade){
+  if(grade === 'unknown') return '';
+  return `<span class="chip ${grade}">${gradeLabel[grade]}</span>`;
+}
+function setChip(el, grade){
+  el.className = 'chip ' + grade;
+  el.textContent = grade === 'unknown' ? '' : gradeLabel[grade];
+}
+// 타일 숫자 + 단위
+function valueHTML(v, digits, unit){
+  if(!has(v)) return '<span class="tile-empty">—</span>';
+  return `${fmt(v, digits)}<span class="unit">${unit}</span>`;
+}
+
+// ════════════════════════════════════════════════════
+// 시트 (모달)
+// ════════════════════════════════════════════════════
+function openSheet(id){
+  $(id).classList.add('open');
+  document.body.classList.add('sheet-open');
+}
+
+function closeSheet(id){
+  $(id).classList.remove('open');
+  if(!document.querySelector('.sheet-backdrop.open')) document.body.classList.remove('sheet-open');
+  // 확인 시트를 그냥 닫으면 "취소"로 처리
+  if(id === 'confirmSheet' && confirmResolve){
+    const r = confirmResolve; confirmResolve = null; r(false);
+  }
+}
+
+function backdropClose(e){
+  if(e.target === e.currentTarget) closeSheet(e.currentTarget.id);
+}
+
+// ESC로 닫기
+document.addEventListener('keydown', e => {
+  if(e.key !== 'Escape') return;
+  document.querySelectorAll('.sheet-backdrop.open').forEach(s => closeSheet(s.id));
+});
+
+// ── 아래로 쓸어서 닫기 (폰 화면의 바텀시트) ──────────
+// - 내용이 맨 위까지 올라가 있을 때 아래로 끌면 시트가 손가락을 따라 내려감
+// - 시트 높이의 30% 넘게 내리거나, 빠르게 휙 내리면 닫힘 / 아니면 제자리로
+// - 지도(#naverMap) 위에서 끄는 건 지도 조작이라 제외
+const SWIPE_CLOSE_RATIO = 0.3;   // 이만큼(시트 높이 비율) 내리면 닫힘
+const SWIPE_CLOSE_SPEED = 0.5;   // 이 속도(px/ms)보다 빠르게 내리면 닫힘
+
+document.querySelectorAll('.sheet-backdrop').forEach(backdrop => {
+  const sheet = backdrop.querySelector('.sheet');
+  let tracking = false, dragging = false;
+  let startY = 0, dy = 0, lastY = 0, lastT = 0, speed = 0;
+  let baseAlpha = 0.45;   // 시트 뒤 막의 원래 진하기 (테마마다 다름)
+
+  const clearStyles = () => {
+    sheet.style.transition = sheet.style.transform = '';
+    backdrop.style.transition = backdrop.style.background = '';
+  };
+
+  sheet.addEventListener('touchstart', e => {
+    if(window.innerWidth >= 640 || e.touches.length !== 1) return;   // PC 가운데 창은 제외
+    if(e.target.closest('#naverMap')) return;
+    tracking = true; dragging = false; dy = 0; speed = 0;
+    startY = lastY = e.touches[0].clientY;
+    lastT = e.timeStamp;
+  }, { passive: true });
+
+  sheet.addEventListener('touchmove', e => {
+    if(!tracking) return;
+    const y = e.touches[0].clientY;
+    if(!dragging){
+      const d = y - startY;
+      if(d > 6 && sheet.scrollTop <= 0){          // 맨 위에서 아래로 → 시트 끌기 시작
+        dragging = true;
+        startY = lastY = y; lastT = e.timeStamp;
+        sheet.style.transition = 'none';
+        const m = getComputedStyle(backdrop).backgroundColor.match(/[\d.]+(?=\)$)/);
+        baseAlpha = m ? parseFloat(m[0]) : 0.45;
+      } else if(d < -6 || sheet.scrollTop > 0){   // 위로 or 내용 스크롤 중 → 평소 스크롤
+        tracking = false;
+        return;
+      } else {
+        return;
+      }
+    }
+    e.preventDefault();                           // 끄는 동안은 페이지 스크롤·새로고침 막기
+    dy = Math.max(0, y - startY);
+    speed = (y - lastY) / Math.max(e.timeStamp - lastT, 1);
+    lastY = y; lastT = e.timeStamp;
+    sheet.style.transform = `translateY(${dy}px)`;
+    const p = Math.min(dy / sheet.offsetHeight, 1);
+    backdrop.style.background = `rgba(0, 0, 0, ${(baseAlpha * (1 - p)).toFixed(3)})`;
+  }, { passive: false });
+
+  const end = () => {
+    if(!tracking) return;
+    tracking = false;
+    if(!dragging) return;
+    const close = dy > sheet.offsetHeight * SWIPE_CLOSE_RATIO || (speed > SWIPE_CLOSE_SPEED && dy > 30);
+    sheet.style.transition = 'transform .25s cubic-bezier(.2, .8, .2, 1)';
+    backdrop.style.transition = 'background .25s ease';
+    if(close){
+      sheet.style.transform = 'translateY(100%)';
+      backdrop.style.background = 'rgba(0, 0, 0, 0)';
+      setTimeout(() => { closeSheet(backdrop.id); clearStyles(); }, 250);
+    } else {
+      sheet.style.transform = 'translateY(0)';
+      backdrop.style.background = '';
+      setTimeout(clearStyles, 250);
+    }
+  };
+  sheet.addEventListener('touchend', end);
+  sheet.addEventListener('touchcancel', end);
+});
+
+// ════════════════════════════════════════════════════
+// 토스트 / 확인 (alert, confirm 대체)
+// ════════════════════════════════════════════════════
+let toastTimer = null;
+function toast(msg, isError=false){
+  const el = $('toast');
+  el.textContent = msg;
+  el.classList.toggle('error', isError);
+  el.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => el.classList.remove('show'), 2600);
+}
+
+let confirmResolve = null;
+function askConfirm(title, desc, okLabel='확인'){
+  return new Promise(resolve => {
+    $('confirmTitle').textContent = title;
+    $('confirmDesc').textContent = desc;
+    $('confirmOk').textContent = okLabel;
+    confirmResolve = resolve;
+    openSheet('confirmSheet');
+  });
+}
+function answerConfirm(value){
+  const r = confirmResolve;
+  confirmResolve = null;
+  closeSheet('confirmSheet');
+  if(r) r(value);
+}
+
+// ════════════════════════════════════════════════════
+// 상세 정보 시트
+// ════════════════════════════════════════════════════
+let lastState = {};
+
+const row = (label, value, grade='unknown') =>
+  `<div class="row"><span class="row-label">${label}</span><span class="row-value">${value}${chip(grade)}</span></div>`;
+
+function openDetail(type){
+  const body = $('detailBody');
+  const title = $('detailTitle');
+
+  if(type === 'weather'){
+    title.textContent = '바깥 날씨';
+    const w = lastState.weather || {};
+    body.innerHTML =
+      row('기온', `${fmt(w.temperature)}°C`) +
+      row('습도', `${fmt(w.humidity, 0)}%`) +
+      row('풍속', `${fmt(w.wind_speed)}m/s`, gradeWind(w.wind_speed)) +
+      row('하늘', mapSky(w.sky)) +
+      row('강수', mapPrec(w.precipitation));
+  }
+  else if(type === 'air'){
+    title.textContent = '바깥 공기';
+    const a = lastState.air || {};
+    body.innerHTML =
+      row('초미세먼지 (PM2.5)', `${fmt(a.pm25, 0)}㎍/㎥`, gradePM25(a.pm25)) +
+      row('미세먼지 (PM10)', `${fmt(a.pm10, 0)}㎍/㎥`, gradePM10(a.pm10)) +
+      row('오존 (O₃)', `${fmt(a.o3, 4)}ppm`) +
+      row('이산화질소 (NO₂)', `${fmt(a.no2, 4)}ppm`) +
+      row('측정 시각', a.measured_at || '-');
+  }
+  else if(type === 'indoor'){
+    title.textContent = '실내 공기';
+    const i = lastState.indoor || {};
+    if(Object.keys(i).length === 0){
+      body.innerHTML = `<div class="empty-state">${icon('home')}<p>아직 라즈베리파이에서<br>데이터를 받지 못했어요</p></div>`;
+    } else {
+      body.innerHTML =
+        row('이산화탄소 (CO₂)', has(i.co2) ? `${fmt(i.co2, 0)}ppm` : '-', gradeCO2(i.co2)) +
+        row('초미세먼지 (PM2.5)', has(i.pm25) ? `${fmt(i.pm25, 0)}㎍/㎥` : '-', gradePM25(i.pm25)) +
+        row('미세먼지 (PM10)', has(i.pm10) ? `${fmt(i.pm10, 0)}㎍/㎥` : '-', gradePM10(i.pm10)) +
+        row('기온', has(i.temperature) ? `${fmt(i.temperature, 1)}°C` : '-') +
+        row('습도', has(i.humidity) ? `${fmt(i.humidity, 0)}%` : '-') +
+        row('측정 시각', i.updated_at || '-');
+    }
+  }
+
+  openSheet('detailSheet');
+}
+
+// ════════════════════════════════════════════════════
+// API
+// ════════════════════════════════════════════════════
+async function api(path, body){
+  const opts = { headers:{'Content-Type':'application/json'} };
+  if(body){ opts.method='POST'; opts.body=JSON.stringify(body); }
+  const r = await fetch(path, opts);
+  if(!r.ok) throw new Error((await r.json()).detail || 'failed');
+  return r.json();
+}
+
+// ════════════════════════════════════════════════════
+// 타이머
+// ════════════════════════════════════════════════════
+async function startTimer(seconds){
+  try {
+    await api('/api/window/timer', { duration_seconds: seconds });
+    closeSheet('timerSheet');
+    toast(seconds > 0 ? '창문을 열었어요. 시간이 되면 닫아드릴게요' : '창문을 열었어요');
+    refresh();
+  } catch(e){ toast('창문을 열지 못했어요: ' + e.message, true); }
+}
+
+async function extendTimer(seconds){
+  try {
+    await api('/api/window/timer/extend', { duration_seconds: seconds });
+    toast(`${seconds / 60}분 더 열어둘게요`);
+    refresh();
+  } catch(e){ toast('연장하지 못했어요: ' + e.message, true); }
+}
+
+async function cancelTimer(){
+  const ok = await askConfirm('타이머를 끌까요?', '창문은 지금처럼 열린 채로 있어요.', '타이머 끄기');
+  if(!ok) return;
+  try {
+    await api('/api/window/timer/cancel', {});
+    toast('타이머를 껐어요');
+    refresh();
+  } catch(e){ toast('타이머를 끄지 못했어요: ' + e.message, true); }
+}
+
+// 남은 시간 포맷팅 (밀리초 → "MM:SS" 또는 "H:MM:SS")
+function formatRemaining(ms){
+  if(ms <= 0) return '00:00';
+  const totalSec = Math.floor(ms / 1000);
+  const h = Math.floor(totalSec / 3600);
+  const m = Math.floor((totalSec % 3600) / 60);
+  const s = totalSec % 60;
+  if(h > 0) return `${h}:${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;
+  return `${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;
+}
+
+// 카운트다운 (1초마다 화면 업데이트)
+let timerInterval = null;
+
+function startCountdown(endIso){
+  if(timerInterval) clearInterval(timerInterval);
+
+  function update(){
+    const remaining = new Date(endIso).getTime() - Date.now();
+    $('timerRemaining').textContent = formatRemaining(remaining);
+    if(remaining <= 0){
+      clearInterval(timerInterval);
+      timerInterval = null;
+    }
+  }
+
+  update();
+  timerInterval = setInterval(update, 1000);
+}
+
+function stopCountdown(){
+  if(timerInterval) clearInterval(timerInterval);
+  timerInterval = null;
+}
+
+// ════════════════════════════════════════════════════
+// 메인 새로고침
+// ════════════════════════════════════════════════════
+const WIN = {
+  open:   { chip:'열림',      title:'창문이 열려 있어요',      why:'왜 열렸나요?' },
+  closed: { chip:'닫힘',      title:'창문이 닫혀 있어요',      why:'왜 닫혔나요?' },
+};
+
+// 첫 화면에 보여줄 "사람 말" 이유 (서버의 기술적인 사유는 판단 근거 시트에서만)
+const RULE_TEXT = {
+  co2:          '실내 공기가 답답해서 환기하고 있어요',
+  indoor_pm:    '바깥 공기가 더 깨끗해서 환기하고 있어요',
+  good:         '바깥 공기가 좋아서 환기하고 있어요',
+  vent_short:   '바깥 공기가 나빠서 짧게만 환기하고 있어요',
+  vent_rest:    '짧게 환기했어요 · 잠시 쉬었다가 다시 판단할게요',
+  wind:         '바람이 강해서 닫았어요',
+  outdoor_bad:  '바깥 미세먼지가 나빠서 닫았어요',
+  outdoor_vbad: '바깥 미세먼지가 심해서 닫았어요',
+  no_data:      '날씨 정보를 못 받아서 안전하게 닫았어요',
+};
+
+function friendlyReason(s){
+  if(s.source === 'auto'){
+    if(s.last_rule === 'rain') return (s.weather || {}).precipitation === 'snow' ? '눈이 와서 닫았어요' : '비가 와서 닫았어요';
+    // 짧게 환기 중이면 언제 닫히는지도 (서버 시각 → HH:MM)
+    if(s.last_rule === 'vent_short' && s.vent_end_at) return `${RULE_TEXT.vent_short} · ${hhmm(new Date(s.vent_end_at))}에 닫혀요`;
+    if(RULE_TEXT[s.last_rule]) return RULE_TEXT[s.last_rule];
+  }
+  if(s.source === 'timer') return '타이머가 끝나서 닫았어요';
+  if(s.source === 'manual') return s.window_status === 'closed' ? '직접 닫았어요' : '직접 열었어요';
+  return cleanReason(s.last_reason) || '-';
+}
+
+// navbar 자동/수동 토글 + 수동일 때 조작 패널 올리기
+function renderMode(mode){
+  const manual = mode === 'manual';
+  $('modeToggle').dataset.mode = manual ? 'manual' : 'auto';
+  $('modeLabel').textContent = manual ? '수동' : '자동';
+  document.body.classList.toggle('manual', manual);
+  $('dock').setAttribute('aria-hidden', !manual);
+  syncDockSpace();
+}
+
+// 조작 패널 높이만큼 페이지 아래 여백 확보 (내용이 가려지지 않게)
+function syncDockSpace(){
+  const h = document.body.classList.contains('manual') ? $('dock').offsetHeight : 0;
+  document.documentElement.style.setProperty('--dock-h', h + 'px');
+}
+window.addEventListener('resize', syncDockSpace);
+
+// ── 라즈베리파이 연결 상태 ─────────────────────────
+// 파이는 5초마다 전송 → 30초 넘게 안 오면 끊김으로 판단
+const OFFLINE_AFTER_SEC = 30;
+
+function renderConn(s){
+  const i = s.indoor || {};
+  let state, text;
+  let when = '';
+  if(!i.updated_at){
+    state = 'waiting';
+    text = '라즈베리파이 기다리는 중';
+  } else {
+    const age = (tsMs(s.server_time) - tsMs(i.updated_at)) / 1000;
+    state = age <= OFFLINE_AFTER_SEC ? 'online' : 'offline';
+    text = state === 'online' ? '라즈베리파이 연결됨' : '라즈베리파이 연결 끊김';
+    when = state === 'online' ? `· ${agoText(age)} 수신` : `· ${agoText(age)}`;
+  }
+  $('conn').dataset.state = state;
+  $('conn').title = `${text} ${when}`.trim();   // 좁은 화면에선 시간은 툴팁으로
+  $('connText').innerHTML = `${text}<span class="conn-time">${when}</span>`;
+  return state;
+}
+
+// ── 판단 근거 ──────────────────────────────────────
+const CHECK_ICON = { ok:'check', warn:'alert', close:'x', open:'up', none:'minus' };
+
+// 서버가 "지금 값"으로 매번 다시 계산해서 내려줌 (s.checks, s.suggested_status)
+function renderChecks(s){
+  const checks = s.checks;
+  const win = WIN[s.window_status];
+  $('whyBtn').hidden = !(checks && checks.length && win);
+  if($('whyBtn').hidden) return;
+
+  const manual = s.mode === 'manual';
+  const suggested = WIN[s.suggested_status];
+  const differs = suggested && s.suggested_status !== s.window_status;
+  $('whyLabel').textContent = manual ? '자동 모드라면 어떻게 할까요?' : win.why;
+  $('checksTitle').textContent = manual ? '자동 모드라면 이렇게 판단해요' : '이렇게 판단했어요';
+  $('checksMeta').textContent = '날씨·바깥 공기·실내 센서의 지금 값으로 판단한 결과예요';
+  $('checksRaw').textContent = s.last_reason ? `서버 기록: ${cleanReason(s.last_reason)}` : '';
+
+  // 지금 값으로 판단한 결과가 실제 창문 상태와 다를 때 이유 설명
+  const note = $('checksNote');
+  note.hidden = !differs;
+  if(differs){
+    note.textContent = manual
+      ? `자동 모드로 바꾸면 창문이 '${suggested.chip}' 상태가 돼요`
+      : `지금 값이면 '${suggested.chip}'이에요 · 다음 자동 판단(10분마다, 마지막 ${timeOf(s.decided_at)})에 반영돼요`;
+  }
+  $('checksList').innerHTML = checks.map(c => `
+    <li class="check ${c.level}${c.decisive ? ' decisive' : ''}">
+      <span class="check-icon">${icon(CHECK_ICON[c.level] || 'minus')}</span>
+      <span class="check-label">${escapeHTML(c.label)}${c.decisive ? '<span class="check-tag">결정 이유</span>' : ''}</span>
+      <span class="check-detail">${escapeHTML(c.detail)}</span>
+    </li>`).join('');
+}
+
+let lastUpdatedAt = null;
+
+async function refresh(){
+  try {
+    const s = await api('/api/status');
+    lastState = s;
+
+    // 상태가 바뀌었으면 활동 기록도 새로 불러오기
+    if(s.updated_at !== lastUpdatedAt){
+      lastUpdatedAt = s.updated_at;
+      loadEvents();
+    }
+
+    const conn = renderConn(s);
+    renderChecks(s);
+
+    // navbar
+    $('locationLabel').textContent = s.station || '위치 설정';
+    renderMode(s.mode);
+
+    // 창문 상태 (첫 화면)
+    const win = WIN[s.window_status];
+    $('hero').dataset.status = win ? s.window_status : 'loading';
+    $('heroChip').textContent = win ? win.chip : '대기 중';
+    $('heroTitle').textContent = win ? win.title : '창문 상태를 확인하고 있어요';
+    $('heroReason').textContent = win ? friendlyReason(s) : '잠시만 기다려 주세요';
+    const modeText = s.mode === 'auto' ? '자동 모드' : '수동 모드';
+    $('heroMeta').textContent = `${modeText} · ${timeOf(s.updated_at)} 기준`;
+    $('heroMeta').classList.remove('offline');
+
+    // 타이머 (조작 패널 안)
+    const hadTimer = !$('timerBar').hidden;
+    if(s.timer_end_at){
+      $('timerBar').hidden = false;
+      startCountdown(s.timer_end_at);
+    } else {
+      $('timerBar').hidden = true;
+      stopCountdown();
+    }
+    if(hadTimer !== !$('timerBar').hidden) syncDockSpace();   // 패널 높이가 바뀜
+
+    // 타일 - 바깥 날씨
+    const w = s.weather || {};
+    $('weatherIcon').innerHTML = icon(weatherIconName(w));
+    $('tv_weather').innerHTML = valueHTML(w.temperature, 1, '°C');
+    $('ts_weather').textContent = has(w.temperature)
+      ? `${skyOrPrec(w)} · 바람 ${fmt(w.wind_speed)}m/s`
+      : '데이터 없음';
+
+    // 타일 - 바깥 공기
+    const a = s.air || {};
+    $('tv_air').innerHTML = valueHTML(a.pm25, 0, '㎍/㎥');
+    setChip($('tc_air'), worstGrade([gradePM10(a.pm10), gradePM25(a.pm25)]));
+    if(!s.air){
+      $('ts_air').textContent = s.mode === 'manual'
+        ? '자동 모드에서 불러와요'
+        : '불러오지 못했어요 · 곧 다시 시도해요';
+    } else if(!has(a.pm25)){
+      $('ts_air').textContent = '측정소 점검 중이에요';   // 에어코리아가 "-"를 준 경우
+    } else {
+      $('ts_air').textContent = `미세먼지 ${fmt(a.pm10, 0)} · ${timeOf(a.measured_at)} 측정`;
+    }
+
+    // 타일 - 실내
+    const i = s.indoor || {};
+    const noIndoor = Object.keys(i).length === 0;
+    $('tv_co2').innerHTML = valueHTML(i.co2, 0, 'ppm');
+    setChip($('tc_co2'), gradeCO2(i.co2));
+    $('ts_co2').textContent = noIndoor ? '센서 연결 대기 중'
+      : [has(i.temperature) ? `${fmt(i.temperature, 1)}°C` : null,
+         has(i.humidity) ? `습도 ${fmt(i.humidity, 0)}%` : null].filter(Boolean).join(' · ') || '-';
+
+    $('tv_inpm').innerHTML = valueHTML(i.pm25, 0, '㎍/㎥');
+    setChip($('tc_inpm'), gradePM25(i.pm25));
+    if(noIndoor){
+      $('ts_inpm').textContent = '센서 연결 대기 중';
+    } else if(has(i.pm25) && has(a.pm25)){
+      const diff = Math.round(i.pm25 - a.pm25);
+      $('ts_inpm').textContent = diff === 0 ? '바깥과 같아요'
+        : `바깥보다 ${Math.abs(diff)} ${diff > 0 ? '높아요' : '낮아요'}`;
+    } else {
+      $('ts_inpm').textContent = '-';
+    }
+
+    // 연결이 끊겼으면 실내 타일을 흐리게 + 마지막 값이라고 표시
+    const stale = conn === 'offline';
+    $('tileCo2').classList.toggle('stale', stale);
+    $('tileInpm').classList.toggle('stale', stale);
+    if(stale){
+      $('ts_co2').textContent = '연결 끊김 · 마지막 값이에요';
+      $('ts_inpm').textContent = '연결 끊김 · 마지막 값이에요';
+    }
+
+    // 직접 조작 (수동 모드 패널)
+    const manual = s.mode === 'manual';
+    $('btnOpen').disabled = !manual;
+    $('btnClose').disabled = !manual;
+
+  } catch(e){
+    console.error(e);
+    $('heroMeta').textContent = '서버에 연결할 수 없어요 · 다시 시도하는 중';
+    $('conn').dataset.state = 'offline';
+    $('connText').textContent = '서버 연결 끊김';
+    $('heroMeta').classList.add('offline');
+  }
+}
+
+// navbar 토글: 지금 모드의 반대로
+function toggleMode(){
+  setMode(lastState.mode === 'manual' ? 'auto' : 'manual');
+}
+
+async function setMode(mode){
+  if(lastState.mode === mode) return;
+  renderMode(mode);   // 누르자마자 반영 (패널도 바로 올라오고 내려감)
+  try {
+    await api('/api/mode', {mode});
+    toast(mode === 'auto' ? '자동 모드로 바꿨어요' : '수동 모드로 바꿨어요');
+    refresh();
+  } catch(e){
+    renderMode(lastState.mode);
+    toast('모드를 바꾸지 못했어요: ' + e.message, true);
+  }
+}
+
+async function controlWindow(status){
+  try {
+    await api('/api/window', {status});
+    toast(status === 'closed' ? '창문을 닫았어요' : '창문을 열었어요');
+    refresh();
+  } catch(e){ toast(e.message, true); }
+}
+
+// ════════════════════════════════════════════════════
+// 테마 (밝게 / 어둡게) - 선택은 이 브라우저에 저장
+// ════════════════════════════════════════════════════
+function renderThemeIcon(){
+  const dark = document.documentElement.dataset.theme === 'dark';
+  $('themeIcon').setAttribute('href', dark ? '#i-sun' : '#i-moon');
+  $('themeBtn').setAttribute('aria-label', dark ? '밝은 테마로 바꾸기' : '어두운 테마로 바꾸기');
+}
+
+function toggleTheme(){
+  const next = document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark';
+  document.documentElement.dataset.theme = next;
+  try { localStorage.setItem('theme', next); } catch(e) {}
+  renderThemeIcon();
+}
+
+// 직접 고른 적이 없으면 폰/PC 설정이 바뀔 때 따라감
+matchMedia('(prefers-color-scheme: dark)').addEventListener('change', e => {
+  let saved = null;
+  try { saved = localStorage.getItem('theme'); } catch(err) {}
+  if(saved) return;
+  document.documentElement.dataset.theme = e.matches ? 'dark' : 'light';
+  renderThemeIcon();
+});
+renderThemeIcon();
+
+// ════════════════════════════════════════════════════
+// 활동 기록
+// ════════════════════════════════════════════════════
+const EVENT_WINDOW = {
+  open:   { title:'창문 열림',      cls:'open' },
+  half:   { title:'창문 반쯤 열림', cls:'half' },
+  closed: { title:'창문 닫힘',      cls:'closed' },
+};
+const EVENT_KIND = { timer:'타이머', mode:'모드 변경', location:'위치 변경' };
+const SOURCE_SHORT = { auto:'자동', manual:'직접', timer:'타이머', system:'시스템' };
+
+// 오늘이면 "15:32", 아니면 "9/21 15:32"
+function eventTime(ts){
+  const today = (lastState.server_time || '').split(' ')[0];
+  const [date, time] = (ts || '').split(' ');
+  if(!time) return '-';
+  if(date === today) return time.substring(0, 5);
+  const [, m, d] = date.split('-');
+  return `${Number(m)}/${Number(d)} ${time.substring(0, 5)}`;
+}
+
+function eventHTML(e){
+  const w = e.kind === 'window' ? EVENT_WINDOW[e.window_status] : null;
+  const title = w ? w.title : (EVENT_KIND[e.kind] || '기록');
+  const cls = w ? w.cls : 'etc';
+  return `
+    <li class="ev ${cls}">
+      <span class="ev-time">${eventTime(e.timestamp)}</span>
+      <span class="ev-dot"></span>
+      <span class="ev-body">
+        <span class="ev-title">${title}</span>
+        <span class="ev-reason">${escapeHTML(cleanReason(e.reason))}</span>
+      </span>
+      <span class="ev-src">${SOURCE_SHORT[e.source] || ''}</span>
+    </li>`;
+}
+
+async function loadEvents(){
+  try {
+    const { events = [] } = await api('/api/events?limit=30');
+    const empty = '<li class="timeline-empty">아직 기록이 없어요</li>';
+    $('eventFullList').innerHTML = events.length ? events.map(eventHTML).join('') : empty;
+  } catch(e){ console.error('활동 기록 로드 실패:', e); }
+}
+
+// ════════════════════════════════════════════════════
+// 스와이프 페이지 (창문 | 공기 | 추이)
+// 모바일: 가로 스크롤 스냅 + 탭 밑줄 연동 / PC: CSS로 나란히 펼침
+// ════════════════════════════════════════════════════
+const pager = $('pager');
+const tabs = [...document.querySelectorAll('#tabs .tab')];
+
+function goPage(i){
+  pager.scrollTo({ left: i * pager.clientWidth, behavior: 'smooth' });
+}
+
+function syncTabs(){
+  const w = pager.clientWidth || 1;
+  const p = Math.min(Math.max(pager.scrollLeft / w, 0), tabs.length - 1);
+  $('tabInd').style.transform = `translateX(${p * 100}%)`;
+  const cur = Math.round(p);
+  tabs.forEach((t, i) => {
+    t.classList.toggle('active', i === cur);
+    t.setAttribute('aria-selected', i === cur);
+  });
+}
+pager.addEventListener('scroll', syncTabs, { passive: true });
+window.addEventListener('resize', syncTabs);
+
+refresh();
+setInterval(refresh, 2000);
+
+// ════════════════════════════════════════════════════
+// 위치 설정 (네이버 지도)
+// ════════════════════════════════════════════════════
+let naverMap = null;
+let naverMarker = null;
+let selectedLat = null;
+let selectedLng = null;
+
+// 기본 위치 (인천 정왕동 - config.py 기본값과 맞춤)
+const DEFAULT_LAT = 37.3392;
+const DEFAULT_LNG = 126.7366;
+
+function openMapSheet() {
+  $('mapCurrentStation').textContent = lastState.station ? `${lastState.station} 측정소` : '설정된 위치 없음';
+  openSheet('mapSheet');
+
+  if (typeof naver === 'undefined') {
+    $('naverMap').innerHTML = '<div class="map-error">지도를 불러오지 못했어요</div>';
+    return;
+  }
+
+  // 지도 초기화 (최초 1회만)
+  if (!naverMap) {
+    const initLat = selectedLat ?? lastState.lat ?? DEFAULT_LAT;
+    const initLng = selectedLng ?? lastState.lon ?? DEFAULT_LNG;
+
+    naverMap = new naver.maps.Map('naverMap', {
+      center: new naver.maps.LatLng(initLat, initLng),
+      zoom: 14,
+    });
+
+    naverMarker = new naver.maps.Marker({
+      position: new naver.maps.LatLng(initLat, initLng),
+      map: naverMap,
+    });
+
+    selectedLat = initLat;
+    selectedLng = initLng;
+    updateSelectedCoord();
+
+    // 지도 클릭 → 마커 이동
+    naver.maps.Event.addListener(naverMap, 'click', function(e) {
+      naverMarker.setPosition(e.coord);
+      selectedLat = e.coord.lat();
+      selectedLng = e.coord.lng();
+      updateSelectedCoord();
+    });
+
+  } else {
+    // 시트 다시 열 때 지도 크기 재계산
+    naver.maps.Event.trigger(naverMap, 'resize');
+  }
+}
+
+function updateSelectedCoord() {
+  if (selectedLat === null) {
+    $('selectedCoordText').textContent = '지도를 눌러 주세요';
+    $('saveLocationBtn').disabled = true;
+  } else {
+    $('selectedCoordText').textContent =
+      `위도 ${selectedLat.toFixed(5)} · 경도 ${selectedLng.toFixed(5)}`;
+    $('saveLocationBtn').disabled = false;
+  }
+}
+
+async function saveLocation() {
+  if (selectedLat === null) return;
+
+  const btn = $('saveLocationBtn');
+  btn.disabled = true;
+  btn.textContent = '저장하는 중...';
+
+  try {
+    const res = await api('/api/location', { lat: selectedLat, lng: selectedLng });
+    $('locationLabel').textContent = res.station || '위치를 설정해 주세요';
+    closeSheet('mapSheet');
+    refresh();
+    toast(`측정소를 ${res.station}(으)로 바꿨어요`);
+  } catch(e) {
+    toast('위치를 저장하지 못했어요: ' + e.message, true);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '이 위치로 저장';
+  }
+}
+
+// ════════════════════════════════════════════════════
+// 실내 공기질 차트
+// - 수치 항목: 실제 값 + 배경에 등급 색 띠
+// - 종합: 등급(좋음~매우나쁨)을 계단형으로
+// - 실내·바깥 비교: 실내/바깥 초미세먼지를 겹쳐서
+// - 가로축은 실제 시간 (센서가 꺼져 있던 구간은 끊겨 보임)
+// ════════════════════════════════════════════════════
+let indoorChart = null;
+let chartMetric = 'overall';   // overall / pm25 / pm10 / co2 / compare
+let chartHours = 1;            // 1 / 6 / 24
+
+const METRICS = {
+  overall: { name:'종합 공기질', unit:'',      desc:'초미세먼지·미세먼지·CO₂ 중 가장 나쁜 등급이에요' },
+  pm25:    { name:'초미세먼지',   unit:'㎍/㎥', cuts:[15, 35, 75],      grade: gradePM25 },
+  pm10:    { name:'미세먼지',     unit:'㎍/㎥', cuts:[30, 80, 150],     grade: gradePM10 },
+  co2:     { name:'이산화탄소',   unit:'ppm',   cuts:[700, 1000, 2000], grade: gradeCO2 },
+  compare: { name:'초미세먼지',   unit:'㎍/㎥', cuts:[15, 35, 75],      grade: gradePM25,
+             desc:'파란 선(실내)이 회색 선(바깥)보다 위에 있으면 실내가 더 탁해서 환기해요' },
+};
+const INDOOR_GAP_MS = 5 * 60 * 1000;    // 실내 로그는 1분 간격 → 5분 넘게 비면 선을 끊음
+const OUTDOOR_GAP_MS = 25 * 60 * 1000;  // 바깥 로그는 10분 간격
+const TICK_STEP_MIN = { 1: 10, 6: 60, 24: 240 };
+const BAND_COLORS = {
+  good:   'rgba(29, 179, 107, .10)',
+  normal: 'rgba(245, 163, 0, .13)',
+  bad:    'rgba(242, 113, 28, .13)',
+  vbad:   'rgba(240, 68, 82, .13)',
+};
+
+// 등급 구간을 배경 띠로 칠하는 플러그인
+const gradeBands = {
+  id: 'gradeBands',
+  beforeDraw(chart, args, opts){
+    const bands = opts.bands || [];
+    const { ctx, chartArea: area, scales: { y } } = chart;
+    if(!area || !y) return;
+    ctx.save();
+    for(const b of bands){
+      const top = Math.max(area.top, y.getPixelForValue(Math.min(b.to, y.max)));
+      const bottom = Math.min(area.bottom, y.getPixelForValue(Math.max(b.from, y.min)));
+      if(bottom <= top) continue;
+      ctx.fillStyle = BAND_COLORS[b.grade];
+      ctx.fillRect(area.left, top, area.right - area.left, bottom - top);
+    }
+    ctx.restore();
+  }
+};
+
+Chart.defaults.font.family = getComputedStyle(document.body).fontFamily;
+Chart.defaults.color = '#8B95A1';
+
+function calcOverallGrade(indoor){
+  return worstGrade([gradePM25(indoor.pm25), gradePM10(indoor.pm10), gradeCO2(indoor.co2)]);
+}
+
+function extractGrade(indoor, metric){
+  if(metric === 'overall') return calcOverallGrade(indoor);
+  return METRICS[metric].grade(indoor[metric]);
+}
+
+// 차트에 찍을 값 (종합은 등급 번호 0~3)
+function metricValue(indoor, metric){
+  if(metric === 'overall'){
+    const g = calcOverallGrade(indoor);
+    return g === 'unknown' ? null : GRADES.indexOf(g);
+  }
+  return has(indoor[metric]) ? indoor[metric] : null;
+}
+
+function cutsToBands(cuts){
+  const edges = [0, ...cuts, Infinity];
+  return GRADES.map((g, i) => ({ from: edges[i], to: edges[i + 1], grade: g }));
+}
+
+// 차트 컨트롤
+function switchChartMetric(btn){
+  document.querySelectorAll('#metricPills .pill').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  chartMetric = btn.dataset.metric;
+  loadChart(true);
+}
+
+function switchChartHours(btn){
+  document.querySelectorAll('#hoursSeg button').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  chartHours = parseInt(btn.dataset.hours);
+  loadChart(true);
+}
+
+// "지금" 값 표시
+function renderChartNow(indoor){
+  const valEl = $('chartNowVal');
+  const chipEl = $('chartNowChip');
+  valEl.className = 'chart-now-val';
+
+  if(chartMetric === 'compare'){
+    const inV = (indoor || {}).pm25;
+    const outV = (lastState.air || {}).pm25;
+    const part = (v, label) => `${has(v) ? fmt(v, 0) : '-'}<span class="unit">${label}</span>`;
+    valEl.innerHTML = `${part(inV, '실내')}<span class="now-sep">/</span>${part(outV, '바깥')}`;
+    setChip(chipEl, 'unknown');
+    return;
+  }
+
+  if(!indoor){ valEl.textContent = '-'; setChip(chipEl, 'unknown'); return; }
+
+  const g = extractGrade(indoor, chartMetric);
+  if(chartMetric === 'overall'){
+    valEl.textContent = gradeLabel[g];
+    valEl.classList.add('grade-text', g);
+    setChip(chipEl, 'unknown');
+  } else {
+    const v = indoor[chartMetric];
+    valEl.innerHTML = has(v) ? `${fmt(v, 0)}<span class="unit">${METRICS[chartMetric].unit}</span>` : '-';
+    setChip(chipEl, g);
+  }
+}
+
+// 차트 로드
+async function loadChart(animate=false){
+  try {
+    const metric = chartMetric;
+    const hours = chartHours;
+    const isOverall = metric === 'overall';
+    const isCompare = metric === 'compare';
+    const [res, airRes] = await Promise.all([
+      api(`/api/indoor-history?hours=${hours}`),
+      isCompare ? api(`/api/air-history?hours=${hours}`) : null,
+    ]);
+    // 응답 오는 사이 사용자가 다른 탭을 눌렀으면 버림
+    if(metric !== chartMetric || hours !== chartHours) return;
+
+    const logs = res.logs || [];
+    const airLogs = airRes ? (airRes.logs || []) : [];
+    const m = METRICS[metric];
+    const valueKey = isCompare ? 'pm25' : metric;
+
+    $('chartDesc').textContent = m.desc || `${m.name} (${m.unit}) · 배경색은 등급 구간이에요`;
+    $('seriesLegend').hidden = !isCompare;
+
+    if(logs.length === 0 && airLogs.length === 0){
+      if(indoorChart){ indoorChart.destroy(); indoorChart = null; }
+      $('chartEmpty').hidden = false;
+      renderChartNow(null);
+      return;
+    }
+    $('chartEmpty').hidden = true;
+
+    // 데이터: {x: 시각(ms), y: 값}
+    const indoorPts = logs.map(log => ({
+      x: tsMs(log.timestamp),
+      y: metricValue(log.indoor || {}, valueKey),
+      indoor: log.indoor || {},
+    }));
+    const outdoorPts = airLogs
+      .filter(l => has(l.pm25))
+      .map(l => ({ x: tsMs(l.timestamp), y: l.pm25 }));
+
+    const known = [...indoorPts, ...outdoorPts].map(p => p.y).filter(has);
+    const maxVal = known.length ? Math.max(...known) : 0;
+
+    // 가로축: 선택한 기간 전체 (서버 시각 기준)
+    const allX = [...indoorPts, ...outdoorPts].map(p => p.x);
+    const xMax = has(lastState.server_time) ? tsMs(lastState.server_time) : Math.max(...allX);
+    const xMin = xMax - hours * 3600 * 1000;
+    // 바깥 값은 다음 측정 전까지 유지되는 계단형 → 툴팁에서 그 시각의 바깥 값 찾기
+    const outdoorAt = x => {
+      let v = null;
+      for(const p of outdoorPts){ if(p.x <= x) v = p.y; else break; }
+      return v;
+    };
+
+    const datasets = [{
+      label: isCompare ? '실내' : m.name,
+      data: indoorPts,
+      borderColor: '#3182F6',
+      pointBackgroundColor: '#3182F6',
+      borderWidth: 2.5,
+      tension: isOverall ? 0 : 0.3,
+      stepped: isOverall ? 'before' : false,
+      pointRadius: indoorPts.length <= 12 ? 3 : 0,
+      pointHoverRadius: 5,
+      spanGaps: INDOOR_GAP_MS,
+      fill: false,
+    }];
+    if(isCompare){
+      datasets.push({
+        label: '바깥',
+        data: outdoorPts,
+        borderColor: '#8B95A1',
+        pointBackgroundColor: '#8B95A1',
+        borderWidth: 2,
+        borderDash: [6, 4],
+        stepped: 'before',
+        pointRadius: 0,
+        pointHoverRadius: 4,
+        spanGaps: OUTDOOR_GAP_MS,
+        fill: false,
+      });
+    }
+
+    const yScale = isOverall
+      ? {
+          min: -0.5, max: 3.5,
+          afterBuildTicks: axis => { axis.ticks = [0, 1, 2, 3].map(v => ({ value: v })); },
+          ticks: { callback: v => gradeLabel[GRADES[v]] || '', font: { size: 11 } },
+          grid: { display: false },
+          border: { display: false },
+        }
+      : {
+          min: 0,
+          suggestedMax: Math.max(maxVal * 1.2, m.cuts[0] * 1.5),
+          ticks: { maxTicksLimit: 5, font: { size: 11 } },
+          grid: { color: 'rgba(128, 128, 128, .12)' },
+          border: { display: false },
+        };
+
+    if(indoorChart) indoorChart.destroy();
+
+    indoorChart = new Chart($('indoorChart').getContext('2d'), {
+      type: 'line',
+      data: { datasets },
+      plugins: [gradeBands],
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        animation: animate ? { duration: 400 } : false,
+        interaction: { mode: 'nearest', axis: 'x', intersect: false },
+        plugins: {
+          legend: { display: false },
+          gradeBands: {
+            bands: isOverall
+              ? GRADES.map((g, k) => ({ from: k - 0.5, to: k + 0.5, grade: g }))
+              : cutsToBands(m.cuts),
+          },
+          tooltip: {
+            backgroundColor: 'rgba(25, 31, 40, .92)',
+            padding: 12,
+            cornerRadius: 12,
+            displayColors: false,
+            callbacks: {
+              title: items => items.length ? hhmm(items[0].parsed.x) : '',
+              label: function(ctx){
+                if(isCompare){
+                  const v = ctx.parsed.y;
+                  if(ctx.datasetIndex === 1) return `바깥 ${v}㎍/㎥ · ${gradeLabel[gradePM25(v)]}`;
+                  const out = outdoorAt(ctx.parsed.x);
+                  const lines = [`실내 ${v}㎍/㎥ · ${gradeLabel[gradePM25(v)]}`];
+                  if(has(out)) lines.push(`바깥 ${out}㎍/㎥`);
+                  return lines;
+                }
+                const indoor = ctx.raw.indoor || {};
+                if(isOverall){
+                  const lines = [`종합 ${gradeLabel[GRADES[ctx.parsed.y]] || '-'}`];
+                  if(has(indoor.pm25)) lines.push(`초미세먼지 ${indoor.pm25}㎍/㎥`);
+                  if(has(indoor.pm10)) lines.push(`미세먼지 ${indoor.pm10}㎍/㎥`);
+                  if(has(indoor.co2))  lines.push(`이산화탄소 ${indoor.co2}ppm`);
+                  return lines;
+                }
+                return `${m.name} ${ctx.parsed.y}${m.unit} · ${gradeLabel[m.grade(ctx.parsed.y)]}`;
+              }
+            }
+          }
+        },
+        scales: {
+          y: yScale,
+          x: {
+            type: 'linear',
+            min: xMin,
+            max: xMax,
+            grid: { display: false },
+            border: { display: false },
+            // 눈금을 10분/1시간/4시간 단위 정각에 맞춤 (브라우저 시간대 기준)
+            afterBuildTicks: axis => {
+              const step = TICK_STEP_MIN[hours] * 60000;
+              const off = new Date().getTimezoneOffset() * 60000;
+              const ticks = [];
+              for(let t = Math.ceil((axis.min - off) / step) * step + off; t <= axis.max; t += step){
+                ticks.push({ value: t });
+              }
+              axis.ticks = ticks;
+            },
+            ticks: { maxRotation: 0, autoSkip: true, maxTicksLimit: 7, callback: v => hhmm(v), font: { size: 11 } },
+          }
+        }
+      }
+    });
+
+    renderChartNow(logs.length ? (logs[logs.length - 1].indoor || {}) : null);
+
+  } catch(e){
+    console.error('차트 로드 실패:', e);
+  }
+}
+
+// 처음 로드 + 30초마다 자동 갱신
+loadChart(true);
+setInterval(loadChart, 30000);
+</script>
+
+</body>
+</html>
