@@ -41,11 +41,23 @@ VENT_CYCLE_TEST = os.getenv("VENT_CYCLE_TEST", "0") == "1"
 VENT_CYCLE_OPEN_SECONDS = int(os.getenv("VENT_CYCLE_OPEN_SECONDS", "60"))
 VENT_CYCLE_CLOSE_SECONDS = int(os.getenv("VENT_CYCLE_CLOSE_SECONDS", "30"))
 
-# 로그 파일     
-LOG_FILE = os.getenv("LOG_FILE", "logs/air_log.json")
-MAX_LOG_COUNT = 120
+# ── 데이터베이스 (MySQL) ─────────────────────────────
+# 접속 정보는 .env 에 적습니다. DB_NAME 은 MySQL 안에 만든 데이터베이스 이름 (표는 서버가 자동으로 만듦)
+DB_HOST = os.getenv("DB_HOST", "localhost")
+DB_PORT = int(os.getenv("DB_PORT", "3306"))
+DB_NAME = os.getenv("DB_NAME", "smartwindow")
+DB_USER = os.getenv("DB_USER", "root")
+DB_PASSWORD = os.getenv("DB_PASSWORD", "")
+# (선택) 접속 주소를 통째로 지정. 지정하면 위 값 대신 이걸 씀. 예: sqlite:///test.db
+DATABASE_URL = os.getenv("DATABASE_URL", "")
 
-# 실내 센서 로그 파일
+# 기록 보관 기간 (일). 지나면 자동으로 지움
+INDOOR_KEEP_DAYS = int(os.getenv("INDOOR_KEEP_DAYS", "30"))   # 실내 센서 (1분마다)
+AIR_KEEP_DAYS = int(os.getenv("AIR_KEEP_DAYS", "30"))         # 바깥 날씨·공기 (10분마다)
+EVENT_KEEP_DAYS = int(os.getenv("EVENT_KEEP_DAYS", "90"))     # 활동 기록
+
+# 예전 JSON 기록 파일 (DB 로 처음 한 번 옮길 때만 읽음)
+LOG_FILE = os.getenv("LOG_FILE", "logs/air_log.json")
 INDOOR_LOG_FILE = os.getenv("INDOOR_LOG_FILE", "logs/indoor_log.json")
 
 # 서버 포트

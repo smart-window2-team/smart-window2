@@ -4,6 +4,7 @@
 !app.py
 !config.py
 !external.py
+!db.py
 !templates/
 !templates/dashboard.html
 !static/

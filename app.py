@@ -21,13 +21,13 @@ from config import (
     AUTO_INTERVAL_SECONDS,
     LOG_FILE,
     INDOOR_LOG_FILE,   # ★ 추가
-    MAX_LOG_COUNT,
     PORT,
     VENT_CYCLE_TEST,            # ★ 환기 주기 테스트 모드
     VENT_CYCLE_OPEN_SECONDS,
     VENT_CYCLE_CLOSE_SECONDS,
 )
 from external import get_air_quality, get_kma_weather, get_location, get_nearest_station
+import db   # ★ 기록·설정 저장 (MySQL)
 
 app = FastAPI(title="스마트 창문 서버", version="2.0.0")
 # ★ 추가: static 폴더를 /static 경로로 노출
@@ -58,6 +58,11 @@ except Exception:
 
 def now_str() -> str:
     return datetime.now(KST).strftime("%Y-%m-%d %H:%M:%S")
+
+
+def now_local() -> datetime:
+    """DB 에 넣는 시각: 한국 시간, 시간대 표시 없는 값 (서버가 어느 나라에 있든 같게)"""
+    return datetime.now(KST).replace(tzinfo=None)
 
 
 # ── 전역 상태 (스레드 안전) ────────────────────────────────────────────────
@@ -297,125 +302,52 @@ def explain_window(weather, air, indoor, decision):
     return checks
 
 
-# ── 로그 저장 ──────────────────────────────────────────────────────────────
+# ── 기록 저장 (DB) ─────────────────────────────────────────────────────────
+# 예전에는 JSON 파일 전체를 읽고 다시 썼음 → 지금은 DB 에 한 줄씩 넣음 (db.py)
+EVENT_JSON_FILE = os.path.join(os.path.dirname(LOG_FILE), "window_events.json")   # 예전 활동 기록 (이전용)
+
+
+def _db_safe(what, func, *args, **kwargs):
+    """DB 작업이 실패해도 창문 제어는 계속되게: 에러는 로그만 남기고 넘어감"""
+    try:
+        return func(*args, **kwargs)
+    except Exception as exc:
+        print(f"[DB] {what} 실패: {exc}")
+        return None
+
+
 def save_log(weather, air, decision):
-    folder = os.path.dirname(LOG_FILE)
-    if folder:
-        os.makedirs(folder, exist_ok=True)
+    """바깥 날씨·공기와 그때의 자동 판단 기록 (자동 판단할 때마다)"""
+    _db_safe("바깥 기록 저장", db.add_air_log, now_local(), weather, air, decision)
 
-    logs = []
-    if os.path.exists(LOG_FILE):
-        try:
-            with open(LOG_FILE, "r", encoding="utf-8") as f:
-                logs = json.load(f)
-        except Exception:
-            logs = []
 
-    logs.append({
-        "timestamp": now_str(),
-        "weather": weather,
-        "air": air,
-        "decision": decision,
-    })
-    if len(logs) > MAX_LOG_COUNT:
-        logs = logs[-MAX_LOG_COUNT:]
-
-    tmp = LOG_FILE + ".tmp"
-    with open(tmp, "w", encoding="utf-8") as f:
-        json.dump(logs, f, ensure_ascii=False, indent=2)
-    os.replace(tmp, LOG_FILE)
-    
-# 실내 센서 로그 저장
 def save_indoor_log(indoor):
-    """
-    실내 센서 로그 저장.
-    - 1분에 한 번만 파일에 기록
-    - 최대 120개 유지 (큐 방식, 오래된 거 자동 삭제)
-    """
+    """실내 센서 기록. 센서값은 5초마다 오지만 1분에 한 번만 저장"""
     global _last_indoor_log_time
 
     now_dt = datetime.now(KST)
-
-    # 1분 안 지났으면 저장 안 함
     if _last_indoor_log_time is not None:
-        elapsed = (now_dt - _last_indoor_log_time).total_seconds()
-        if elapsed < LOG_INTERVAL_SECONDS:
+        if (now_dt - _last_indoor_log_time).total_seconds() < LOG_INTERVAL_SECONDS:
             return   # 1분 안 지남 → 스킵
-
-    # 1분 지났으면 저장
     _last_indoor_log_time = now_dt
 
-    folder = os.path.dirname(INDOOR_LOG_FILE)
-    if folder:
-        os.makedirs(folder, exist_ok=True)
-
-    logs = []
-    if os.path.exists(INDOOR_LOG_FILE):
-        try:
-            with open(INDOOR_LOG_FILE, "r", encoding="utf-8") as f:
-                logs = json.load(f)
-        except Exception:
-            logs = []
-
-    # 새 데이터 추가
-    logs.append({
-        "timestamp": now_str(),
-        "indoor": indoor,
-    })
-
-    # ★ 큐 방식: 120개 초과하면 앞에서부터 삭제
-    if len(logs) > MAX_LOG_COUNT:
-        logs = logs[-MAX_LOG_COUNT:]   # 마지막 120개만 유지
-
-    tmp = INDOOR_LOG_FILE + ".tmp"
-    with open(tmp, "w", encoding="utf-8") as f:
-        json.dump(logs, f, ensure_ascii=False, indent=2)
-    os.replace(tmp, INDOOR_LOG_FILE)
-
-    print(f"[LOG] 실내 로그 저장: {len(logs)}개 유지 ({now_str()})")
-
-
-# 창문/모드 변경 이벤트 기록 (대시보드 '활동 기록'용)
-EVENT_LOG_FILE = os.path.join(os.path.dirname(LOG_FILE), "window_events.json")
-MAX_EVENT_COUNT = 200
-event_lock = threading.Lock()
-
-
-def _read_json_list(path):
-    if not os.path.exists(path):
-        return []
-    try:
-        with open(path, "r", encoding="utf-8") as f:
-            return json.load(f)
-    except Exception:
-        return []
+    _db_safe("실내 기록 저장", db.add_indoor_log, now_local(), indoor)
 
 
 def add_event(kind, reason, source, window_status=None):
     """
+    활동 기록 (대시보드 '활동 기록'용)
     kind: window(창문 상태 변경) / timer / mode / location
     source: auto / manual / timer / system
     """
-    with event_lock:
-        folder = os.path.dirname(EVENT_LOG_FILE)
-        if folder:
-            os.makedirs(folder, exist_ok=True)
+    _db_safe("활동 기록 저장", db.add_event, now_local(), kind, reason, source, window_status)
 
-        events = _read_json_list(EVENT_LOG_FILE)
-        events.append({
-            "timestamp": now_str(),
-            "kind": kind,
-            "window_status": window_status,
-            "reason": reason,
-            "source": source,
-        })
-        if len(events) > MAX_EVENT_COUNT:
-            events = events[-MAX_EVENT_COUNT:]
 
-        tmp = EVENT_LOG_FILE + ".tmp"
-        with open(tmp, "w", encoding="utf-8") as f:
-            json.dump(events, f, ensure_ascii=False, indent=2)
-        os.replace(tmp, EVENT_LOG_FILE)
+def save_settings():
+    """재시작해도 유지할 설정(모드·위치·측정소) 저장"""
+    with state_lock:
+        values = {k: state.get(k) for k in ("mode", "lat", "lon", "station")}
+    _db_safe("설정 저장", db.set_settings, **values)
 
 
 # ── 자동 사이클 (자동 모드일 때 주기적 실행) ───────────────────────────────
@@ -547,10 +479,25 @@ def recheck_in_cycle_test():
         apply_auto_decision(weather, air, indoor, quiet=True)
 
 
+_last_cleanup = datetime.now(KST)
+
+
+def cleanup_daily():
+    """하루에 한 번, 보관 기간이 지난 기록을 DB 에서 지움"""
+    global _last_cleanup
+    if (datetime.now(KST) - _last_cleanup).total_seconds() < 24 * 3600:
+        return
+    _last_cleanup = datetime.now(KST)
+    removed = _db_safe("오래된 기록 정리", db.cleanup_old, now_local())
+    if removed:
+        print(f"[DB] 보관 기간이 지난 기록 {removed}건 정리")
+
+
 def timer_worker():
     """수동 모드 타이머 / 자동 모드 '짧게 환기' 만료 체크 (1초마다)"""
     while not stop_event.is_set():
         try:
+            cleanup_daily()
             end_short_vent(datetime.now(KST))
             if VENT_CYCLE_TEST:
                 recheck_in_cycle_test()
@@ -666,6 +613,7 @@ async def set_mode(req: ModeRequest):
 
     if changed:
         add_event("mode", "자동 모드로 전환" if req.mode == "auto" else "수동 모드로 전환", "manual")
+        save_settings()
 
     # 자동 모드로 바꾸면 즉시 1번 실행
     if req.mode == "auto":
@@ -718,52 +666,31 @@ async def receive_sensors(data: SensorData):
     return {"ok": True, "received": received}
 
 
-# 히스토리 조회 추가
+# 히스토리 조회 (DB 에서 필요한 기간만 꺼냄)
 @app.get("/api/indoor-history")
 async def get_indoor_history(hours: int = 1):
     """
     실내 센서 히스토리 조회.
     hours: 몇 시간 전까지 (1/6/24)
     """
-    logs = _filter_recent(_read_json_list(INDOOR_LOG_FILE), hours)
+    since = now_local() - timedelta(hours=hours)
+    logs = _db_safe("실내 기록 조회", db.get_indoor_logs, since) or []
     return {"logs": logs, "hours": hours}
-
-
-def _filter_recent(logs, hours):
-    """timestamp 기준으로 최근 hours 시간 안의 로그만"""
-    cutoff = datetime.now(KST) - timedelta(hours=hours)
-    filtered = []
-    for log in logs:
-        try:
-            ts = datetime.strptime(log["timestamp"], "%Y-%m-%d %H:%M:%S")
-            ts = ts.replace(tzinfo=KST)
-            if ts >= cutoff:
-                filtered.append(log)
-        except Exception:
-            continue
-    return filtered
 
 
 @app.get("/api/air-history")
 async def get_air_history(hours: int = 1):
-    """바깥 대기질 히스토리 (자동 사이클 로그에서 추출) - 실내/바깥 비교 차트용"""
-    logs = []
-    for log in _filter_recent(_read_json_list(LOG_FILE), hours):
-        air = log.get("air") or {}
-        logs.append({
-            "timestamp": log["timestamp"],
-            "pm25": air.get("pm25"),
-            "pm10": air.get("pm10"),
-        })
+    """바깥 대기질 히스토리 - 실내/바깥 비교 차트용"""
+    since = now_local() - timedelta(hours=hours)
+    logs = _db_safe("바깥 기록 조회", db.get_air_logs, since) or []
     return {"logs": logs, "hours": hours}
 
 
 @app.get("/api/events")
 async def get_events(limit: int = 30):
     """활동 기록 (최신순)"""
-    with event_lock:
-        events = _read_json_list(EVENT_LOG_FILE)
-    return {"events": events[::-1][:limit]}
+    events = _db_safe("활동 기록 조회", db.get_events, limit) or []
+    return {"events": events}
 
 @app.post("/api/location")
 async def set_location(req: LocationRequest):
@@ -791,6 +718,7 @@ async def set_location(req: LocationRequest):
 
     print(f"[LOCATION {now_str()}] ({req.lat:.4f}, {req.lng:.4f}) → {new_station}")
     add_event("location", f"위치 변경 → {new_station}", "manual")
+    save_settings()
 
     # 자동 모드면 즉시 새 데이터 가져오기
     with state_lock:
@@ -883,13 +811,35 @@ async def extend_timer(req: TimerRequest):
 # ── 시작 시 초기화 + 워커 ──────────────────────────────────────────────────
 @app.on_event("startup")
 async def startup():
-    # 측정소 미리 조회 (실패해도 무시)
+    # ★ DB 준비: 표가 없으면 만들고, 예전 JSON 기록이 있으면 처음 한 번 옮김
     try:
-        lat, lon = get_location()
-        state["station"] = get_nearest_station(lat, lon)
-        print(f"[INIT] 측정소: {state['station']}")
+        moved = db.init_db(INDOOR_LOG_FILE, LOG_FILE, EVENT_JSON_FILE)
+        if any(moved.values()):
+            print(f"[DB] 예전 JSON 기록을 옮겼어요: {moved}")
+        print(f"[DB] 연결됨 · 기록 수: {db.count_rows()}")
+        removed = db.cleanup_old(now_local())
+        if removed:
+            print(f"[DB] 보관 기간이 지난 기록 {removed}건 정리")
+
+        # 지난번에 쓰던 모드·위치 복원
+        saved = db.get_settings()
+        with state_lock:
+            for key in ("mode", "lat", "lon", "station"):
+                if saved.get(key) is not None:
+                    state[key] = saved[key]
+        if saved:
+            print(f"[DB] 저장된 설정 복원: {saved}")
     except Exception as exc:
-        print(f"[INIT] 측정소 조회 실패: {exc}")
+        print(f"[DB] ⚠ 연결 실패 → 기록 없이 동작합니다. .env 의 DB_* 값을 확인하세요: {exc}")
+
+    # 측정소 미리 조회 (저장된 위치가 없을 때만, 실패해도 무시)
+    if not state.get("station"):
+        try:
+            lat, lon = get_location()
+            state["station"] = get_nearest_station(lat, lon)
+            print(f"[INIT] 측정소: {state['station']}")
+        except Exception as exc:
+            print(f"[INIT] 측정소 조회 실패: {exc}")
 
     # 백그라운드 워커 시작
     threading.Thread(target=auto_worker, daemon=True).start()
