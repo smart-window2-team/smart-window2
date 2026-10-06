@@ -34,6 +34,13 @@ FIXED_LON = float(os.getenv("FIXED_LON", "126.7366"))
 # 자동 판단 주기 (초)
 AUTO_INTERVAL_SECONDS = int(os.getenv("AUTO_INTERVAL_SECONDS", "600"))
 
+# ── 환기 주기 테스트 모드 ─────────────────────────────
+# .env 에 VENT_CYCLE_TEST=1 을 넣으면 켜짐 (기본은 꺼짐 → 평소 동작 그대로)
+# 켜면 자동 모드에서: 열어도 되는 상황 → OPEN초 열기 → CLOSE초 닫고 쉬기 → 지금 값으로 다시 판단 → 반복
+VENT_CYCLE_TEST = os.getenv("VENT_CYCLE_TEST", "0") == "1"
+VENT_CYCLE_OPEN_SECONDS = int(os.getenv("VENT_CYCLE_OPEN_SECONDS", "60"))
+VENT_CYCLE_CLOSE_SECONDS = int(os.getenv("VENT_CYCLE_CLOSE_SECONDS", "30"))
+
 # 로그 파일     
 LOG_FILE = os.getenv("LOG_FILE", "logs/air_log.json")
 MAX_LOG_COUNT = 120

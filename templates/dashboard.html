@@ -720,19 +720,26 @@ const RULE_TEXT = {
   indoor_pm:    '바깥 공기가 더 깨끗해서 환기하고 있어요',
   good:         '바깥 공기가 좋아서 환기하고 있어요',
   vent_short:   '바깥 공기가 나빠서 짧게만 환기하고 있어요',
-  vent_rest:    '짧게 환기했어요 · 잠시 쉬었다가 다시 판단할게요',
+  vent_rest:    '환기를 마치고 잠시 쉬는 중이에요',
   wind:         '바람이 강해서 닫았어요',
   outdoor_bad:  '바깥 미세먼지가 나빠서 닫았어요',
   outdoor_vbad: '바깥 미세먼지가 심해서 닫았어요',
   no_data:      '날씨 정보를 못 받아서 안전하게 닫았어요',
 };
 
+// 남은 시간: 2분 미만은 초, 그 이상은 분
+const remainText = sec => sec < 120 ? `${sec}초` : `${Math.round(sec / 60)}분`;
+
 function friendlyReason(s){
   if(s.source === 'auto'){
     if(s.last_rule === 'rain') return (s.weather || {}).precipitation === 'snow' ? '눈이 와서 닫았어요' : '비가 와서 닫았어요';
-    // 짧게 환기 중이면 언제 닫히는지도 (서버 시각 → HH:MM)
-    if(s.last_rule === 'vent_short' && s.vent_end_at) return `${RULE_TEXT.vent_short} · ${hhmm(new Date(s.vent_end_at))}에 닫혀요`;
-    if(RULE_TEXT[s.last_rule]) return RULE_TEXT[s.last_rule];
+    let text = RULE_TEXT[s.last_rule];
+    if(text){
+      // 시간을 정해 여는 중이면 언제 닫히는지, 쉬는 중이면 언제 다시 판단하는지
+      if(s.window_status === 'open' && has(s.vent_remaining)) text += ` · ${remainText(s.vent_remaining)} 뒤 닫혀요`;
+      if(s.last_rule === 'vent_rest' && has(s.vent_rest_remaining)) text += ` · ${remainText(s.vent_rest_remaining)} 뒤 다시 판단해요`;
+      return text;
+    }
   }
   if(s.source === 'timer') return '타이머가 끝나서 닫았어요';
   if(s.source === 'manual') return s.window_status === 'closed' ? '직접 닫았어요' : '직접 열었어요';
@@ -840,7 +847,7 @@ async function refresh(){
     $('heroTitle').textContent = win ? win.title : '창문 상태를 확인하고 있어요';
     $('heroReason').textContent = win ? friendlyReason(s) : '잠시만 기다려 주세요';
     const modeText = s.mode === 'auto' ? '자동 모드' : '수동 모드';
-    $('heroMeta').textContent = `${modeText} · ${timeOf(s.updated_at)} 기준`;
+    $('heroMeta').textContent = `${modeText} · ${timeOf(s.updated_at)} 기준` + (s.vent_cycle_test ? ' · 환기 주기 테스트 중' : '');
     $('heroMeta').classList.remove('offline');
 
     // 타이머 (조작 패널 안)

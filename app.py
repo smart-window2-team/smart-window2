@@ -22,7 +22,10 @@ from config import (
     LOG_FILE,
     INDOOR_LOG_FILE,   # ★ 추가
     MAX_LOG_COUNT,
-    PORT
+    PORT,
+    VENT_CYCLE_TEST,            # ★ 환기 주기 테스트 모드
+    VENT_CYCLE_OPEN_SECONDS,
+    VENT_CYCLE_CLOSE_SECONDS,
 )
 from external import get_air_quality, get_kma_weather, get_location, get_nearest_station
 
@@ -181,12 +184,26 @@ def decide_window(weather, air, indoor=None):
     return {"window_status": "open", "reason": "열림", "rule": "good"}
 
 
+def is_timed_open(decision):
+    """시간을 정해 두고 여는 판단인가
+    - 평소: 바깥이 나쁠 때의 '짧게 환기'(vent_short)만
+    - 환기 주기 테스트 모드: 모든 '열기' 판단"""
+    return decision["rule"] == "vent_short" or (VENT_CYCLE_TEST and decision["window_status"] == "open")
+
+
+def vent_times():
+    """(여는 시간, 닫고 쉬는 시간) 초"""
+    if VENT_CYCLE_TEST:
+        return VENT_CYCLE_OPEN_SECONDS, VENT_CYCLE_CLOSE_SECONDS
+    return SHORT_VENT_SECONDS, VENT_REST_SECONDS
+
+
 def plan_window(decision, now_dt, vent_end_at, vent_rest_until):
-    """decide_window 결과에 '짧게 열기' 시간 규칙 적용
-    - 짧게 환기 중이면 계속 열어둠
-    - 짧은 환기를 마치고 쉬는 시간이면 닫아둠 (rule: vent_rest)
+    """decide_window 결과에 '시간을 정해 열기' 규칙 적용
+    - 환기 중이면 계속 열어둠
+    - 환기를 마치고 쉬는 시간이면 닫아둠 (rule: vent_rest)
     vent_end_at / vent_rest_until: ISO 문자열 또는 None"""
-    if decision["rule"] != "vent_short":
+    if not is_timed_open(decision):
         return decision
     end = datetime.fromisoformat(vent_end_at) if vent_end_at else None
     rest = datetime.fromisoformat(vent_rest_until) if vent_rest_until else None
@@ -429,21 +446,37 @@ def run_auto_cycle():
         print("[AUTO] 대기질 조회 실패 → 직전 값 사용")
         air = prev_air
 
+    with state_lock:
+        state["weather"] = weather
+        state["air"] = air
+        state["station"] = station
+        state["lat"] = lat          # ★ 추가
+        state["lon"] = lon          # ★ 추가
+
+    decision = apply_auto_decision(weather, air, indoor)
+    save_log(weather, air, decision)
+    return decision
+
+
+def apply_auto_decision(weather, air, indoor, quiet=False):
+    """판단하고 그 결과를 상태에 반영
+    quiet=True: 1초마다 다시 볼 때 사용. 바뀐 게 없으면 아무것도 건드리지 않음"""
     now_dt = datetime.now(KST)
     with state_lock:
-        vent_end_at = state.get("vent_end_at")
-        vent_rest_until = state.get("vent_rest_until")
-    decision = plan_window(decide_window(weather, air, indoor), now_dt, vent_end_at, vent_rest_until)
-
-    print(f"[AUTO {now_str()}] {decision['reason']}")
-
-    with state_lock:
+        decision = plan_window(decide_window(weather, air, indoor), now_dt,
+                               state.get("vent_end_at"), state.get("vent_rest_until"))
         prev_status = state["window_status"]
-        # ★ 짧게 환기: 새로 시작할 때만 끝나는 시각을 정함 / 다른 판단이면 환기 취소
-        if decision["rule"] == "vent_short":
-            if not state.get("vent_end_at"):
-                state["vent_end_at"] = (now_dt + timedelta(seconds=SHORT_VENT_SECONDS)).isoformat()
-                print(f"[AUTO] 짧게 환기 시작 → {SHORT_VENT_SECONDS // 60}분 뒤 닫힘")
+        timed = is_timed_open(decision)
+        starting = timed and not state.get("vent_end_at")     # 시간 정해 열기를 새로 시작
+        changed = starting or prev_status != decision["window_status"] or state.get("last_rule") != decision["rule"]
+        if quiet and not changed:
+            return decision
+
+        # ★ 시간 정해 열기: 새로 시작할 때만 끝나는 시각을 정함 / 다른 판단이면 취소
+        if timed:
+            if starting:
+                open_seconds, _ = vent_times()
+                state["vent_end_at"] = (now_dt + timedelta(seconds=open_seconds)).isoformat()
         else:
             state["vent_end_at"] = None
         state["window_status"] = decision["window_status"]
@@ -451,18 +484,13 @@ def run_auto_cycle():
         state["last_rule"] = decision["rule"]
         state["last_reason"] = decision["reason"]
         state["source"] = "auto"
-        state["weather"] = weather
-        state["air"] = air
-        state["station"] = station
-        state["lat"] = lat          # ★ 추가
-        state["lon"] = lon          # ★ 추가
         state["updated_at"] = now_str()
+
+    print(f"[AUTO {now_str()}] {decision['reason']}" + (f" → {vent_times()[0]}초 뒤 닫힘" if starting else ""))
 
     # 자동 판단은 상태가 바뀔 때만 기록 (10분마다 같은 기록이 쌓이지 않게)
     if prev_status != decision["window_status"]:
         add_event("window", decision["reason"], "auto", decision["window_status"])
-
-    save_log(weather, air, decision)
     return decision
 
 
@@ -497,14 +525,26 @@ def end_short_vent(now_dt):
             return False
         state["window_status"] = "closed"
         state["vent_end_at"] = None
-        state["vent_rest_until"] = (now_dt + timedelta(seconds=VENT_REST_SECONDS)).isoformat()
+        rest_seconds = vent_times()[1]
+        state["vent_rest_until"] = (now_dt + timedelta(seconds=rest_seconds)).isoformat()
         state["last_rule"] = "vent_rest"
-        state["last_reason"] = "짧은 환기 끝 → 닫힘"
+        state["last_reason"] = "환기 끝 → 닫힘"
         state["source"] = "auto"
         state["updated_at"] = now_str()
-    print(f"[AUTO {now_str()}] 짧은 환기 끝 → 닫힘 ({VENT_REST_SECONDS // 60}분 쉬기)")
-    add_event("window", "짧은 환기 끝 → 닫힘", "auto", "closed")
+    print(f"[AUTO {now_str()}] 환기 끝 → 닫힘 ({rest_seconds}초 쉬기)")
+    add_event("window", "환기 끝 → 닫고 쉬는 중", "auto", "closed")
     return True
+
+
+def recheck_in_cycle_test():
+    """환기 주기 테스트 모드: 서버가 가진 지금 값으로 다시 판단 (외부 API 호출 없음)
+    → 쉬는 시간이 끝나면 바로 다시 열고, 환기 중에 비가 오면 바로 닫음"""
+    with state_lock:
+        if state["mode"] != "auto":
+            return
+        weather, air, indoor = state.get("weather"), state.get("air"), state.get("indoor")
+    if weather and air:        # 첫 자동 판단(날씨·공기 수신) 이후부터
+        apply_auto_decision(weather, air, indoor, quiet=True)
 
 
 def timer_worker():
@@ -512,6 +552,8 @@ def timer_worker():
     while not stop_event.is_set():
         try:
             end_short_vent(datetime.now(KST))
+            if VENT_CYCLE_TEST:
+                recheck_in_cycle_test()
 
             with state_lock:
                 timer_end = state.get("timer_end_at")
@@ -589,6 +631,13 @@ async def get_status():
     snap["checks"] = explain_window(snap["weather"], snap["air"], snap["indoor"], live)
     snap["suggested_status"] = live["window_status"]
     snap["server_time"] = now_str()
+    # 환기 남은 시간 / 쉬는 시간 남은 시간 (초). 해당 없으면 None
+    now_dt = datetime.now(KST)
+    remain = lambda iso: max(0, round((datetime.fromisoformat(iso) - now_dt).total_seconds())) if iso else None
+    snap["vent_remaining"] = remain(snap.get("vent_end_at"))
+    rest = remain(snap.get("vent_rest_until"))
+    snap["vent_rest_remaining"] = rest if rest else None
+    snap["vent_cycle_test"] = VENT_CYCLE_TEST
     return snap
 
 @app.get("/api/command")
@@ -846,6 +895,8 @@ async def startup():
     threading.Thread(target=auto_worker, daemon=True).start()
     threading.Thread(target=timer_worker, daemon=True).start()
     print("[INIT] 워커 시작")
+    if VENT_CYCLE_TEST:
+        print(f"[INIT] ★ 환기 주기 테스트 모드: {VENT_CYCLE_OPEN_SECONDS}초 열기 → {VENT_CYCLE_CLOSE_SECONDS}초 닫기 반복")
 
 
 @app.on_event("shutdown")
