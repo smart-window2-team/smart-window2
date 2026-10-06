@@ -746,6 +746,31 @@ function friendlyReason(s){
   return cleanReason(s.last_reason) || '-';
 }
 
+// ── 남은 시간 1초 단위 카운트다운 ──────────────────
+// 서버 값은 2초마다 오므로, 그 사이는 화면에서 1초씩 직접 줄임
+// 서버 값과 2초 이상 어긋나거나 새 환기가 시작됐을 때만 서버 값으로 맞춤 (숫자가 왔다 갔다 하지 않게)
+const ventCount = { vent: null, rest: null };
+
+function syncCount(key, server){
+  if(!has(server)){ ventCount[key] = null; return; }
+  const local = ventCount[key];
+  if(local === null || Math.abs(server - local) >= 2) ventCount[key] = server;
+}
+
+function renderHeroReason(){
+  const s = lastState;
+  if(!WIN[s.window_status]){ $('heroReason').textContent = '잠시만 기다려 주세요'; return; }
+  $('heroReason').textContent = friendlyReason({ ...s, vent_remaining: ventCount.vent, vent_rest_remaining: ventCount.rest });
+}
+
+setInterval(() => {
+  let changed = false;
+  for(const key of ['vent', 'rest']){
+    if(ventCount[key] !== null && ventCount[key] > 0){ ventCount[key]--; changed = true; }
+  }
+  if(changed) renderHeroReason();
+}, 1000);
+
 // navbar 자동/수동 토글 + 수동일 때 조작 패널 올리기
 function renderMode(mode){
   const manual = mode === 'manual';
@@ -845,7 +870,9 @@ async function refresh(){
     $('hero').dataset.status = win ? s.window_status : 'loading';
     $('heroChip').textContent = win ? win.chip : '대기 중';
     $('heroTitle').textContent = win ? win.title : '창문 상태를 확인하고 있어요';
-    $('heroReason').textContent = win ? friendlyReason(s) : '잠시만 기다려 주세요';
+    syncCount('vent', s.vent_remaining);
+    syncCount('rest', s.vent_rest_remaining);
+    renderHeroReason();
     const modeText = s.mode === 'auto' ? '자동 모드' : '수동 모드';
     $('heroMeta').textContent = `${modeText} · ${timeOf(s.updated_at)} 기준` + (s.vent_cycle_test ? ' · 환기 주기 테스트 중' : '');
     $('heroMeta').classList.remove('offline');
