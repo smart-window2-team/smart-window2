@@ -686,6 +686,52 @@ async def get_air_history(hours: int = 1):
     return {"logs": logs, "hours": hours}
 
 
+VENT_MIN_SECONDS = 180                    # 이보다 짧게 열린 건 환기 효과를 계산하지 않음
+VENT_SAMPLE = timedelta(seconds=150)      # 열릴 때·닫힐 때 직전 2~3분의 평균으로 비교
+
+
+def find_last_vent():
+    """가장 최근 환기(창문이 열렸다 닫힌 구간)와 그 전후의 실내 공기. 없으면 None"""
+    now = now_local()
+    spans, start = [], None
+    for ts, status in db.get_window_events(now - timedelta(hours=24)):
+        if status != "closed":
+            start = ts                    # 닫힘 기록 없이 또 열림 = 서버 재시작 → 새로 시작한 것으로 봄
+        elif start is not None:
+            spans.append((start, ts))
+            start = None
+    with state_lock:
+        is_open = state["window_status"] == "open"
+    if start is not None and is_open:
+        spans.append((start, None))       # 지금 환기 중
+
+    # 테스트 모드에서는 여는 시간이 짧으므로 기준도 거기에 맞춤
+    min_seconds = min(VENT_MIN_SECONDS, VENT_CYCLE_OPEN_SECONDS) if VENT_CYCLE_TEST else VENT_MIN_SECONDS
+    candidates = [(s, e) for s, e in spans if ((e or now) - s).total_seconds() >= min_seconds]
+    pad = timedelta(seconds=30)
+    for start, end in reversed(candidates[-5:]):
+        stop = end or now
+        before = db.get_indoor_avg(start - VENT_SAMPLE, start + pad)
+        after = db.get_indoor_avg(stop - VENT_SAMPLE, stop + pad)
+        if not before or not after:
+            continue                      # 그때 센서 기록이 없음
+        return {
+            "start": start.strftime(db.TS_FORMAT),
+            "end": end.strftime(db.TS_FORMAT) if end else None,
+            "ongoing": end is None,
+            "minutes": int((stop - start).total_seconds() // 60),
+            "before": before,
+            "after": after,
+        }
+    return None
+
+
+@app.get("/api/vent-effect")
+async def get_vent_effect():
+    """마지막 환기 전후의 실내 공기 비교 (요약 화면용)"""
+    return {"vent": _db_safe("환기 효과 조회", find_last_vent)}
+
+
 @app.get("/api/events")
 async def get_events(limit: int = 30):
     """활동 기록 (최신순)"""

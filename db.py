@@ -183,6 +183,25 @@ def get_events(limit=30):
                  "reason": r.reason, "source": r.source} for r in rows]
 
 
+def get_window_events(since):
+    """since 이후 창문 열림/닫힘 기록, 시간순. [(시각, 상태)]"""
+    with Session(engine) as s:
+        rows = s.execute(select(Event.ts, Event.window_status)
+                         .where(Event.kind == "window", Event.ts >= since, Event.window_status.is_not(None))
+                         .order_by(Event.ts, Event.id)).all()
+        return [(ts, status) for ts, status in rows]
+
+
+def get_indoor_avg(start, end):
+    """start~end 사이 실내 기록의 평균. 기록이 없으면 None"""
+    with Session(engine) as s:
+        row = s.execute(select(func.count(), *[func.avg(getattr(IndoorLog, k)) for k in INDOOR_FIELDS])
+                        .where(IndoorLog.ts >= start, IndoorLog.ts <= end)).one()
+        if not row[0]:
+            return None
+        return {k: round(float(v), 1) for k, v in zip(INDOOR_FIELDS, row[1:]) if v is not None}
+
+
 # ── 설정 (재시작해도 유지) ─────────────────────────────────────────────────
 def get_settings():
     with Session(engine) as s:

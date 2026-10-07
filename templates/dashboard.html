@@ -87,6 +87,7 @@
       <button class="tab active" role="tab" onclick="goPage(0)">창문</button>
       <button class="tab" role="tab" onclick="goPage(1)">공기</button>
       <button class="tab" role="tab" onclick="goPage(2)">추이</button>
+      <button class="tab" role="tab" onclick="goPage(3)">요약</button>
       <span class="tab-ind" id="tabInd"></span>
     </div>
   </header>
@@ -233,7 +234,17 @@
         <span><i class="sw normal"></i>보통</span>
         <span><i class="sw bad"></i>나쁨</span>
         <span><i class="sw vbad"></i>매우나쁨</span>
+        <span id="bucketNote" hidden></span>
       </div>
+      </div>
+    </section>
+
+    <!-- 4. 요약 (PC에서는 차트 오른쪽) -->
+    <section class="page page-summary">
+      <div class="card summary-card">
+        <h3 class="card-title">최근 1시간 요약</h3>
+        <p class="card-desc">지난 1시간 동안 실내 공기가 어땠는지 보여드려요</p>
+        <div id="summaryBody"></div>
       </div>
     </section>
 
@@ -1052,7 +1063,7 @@ async function loadEvents(){
 }
 
 // ════════════════════════════════════════════════════
-// 스와이프 페이지 (창문 | 공기 | 추이)
+// 스와이프 페이지 (창문 | 공기 | 추이 | 요약)
 // 모바일: 가로 스크롤 스냅 + 탭 밑줄 연동 / PC: CSS로 나란히 펼침
 // ════════════════════════════════════════════════════
 const pager = $('pager');
@@ -1186,6 +1197,9 @@ const METRICS = {
 const INDOOR_GAP_MS = 5 * 60 * 1000;    // 실내 로그는 1분 간격 → 5분 넘게 비면 선을 끊음
 const OUTDOOR_GAP_MS = 25 * 60 * 1000;  // 바깥 로그는 10분 간격
 const TICK_STEP_MIN = { 1: 10, 6: 60, 24: 240 };
+// 점 하나로 묶는 간격(분). 0 = 묶지 않고 1분 기록 그대로 (저장은 항상 1분, 그릴 때만 평균)
+const BUCKET_MIN = { 1: 5, 6: 0, 24: 0 };
+const INDOOR_KEYS = ['co2', 'pm25', 'pm10', 'temperature', 'humidity'];
 const BAND_COLORS = {
   good:   'rgba(29, 179, 107, .10)',
   normal: 'rgba(245, 163, 0, .13)',
@@ -1236,6 +1250,154 @@ function metricValue(indoor, metric){
 function cutsToBands(cuts){
   const edges = [0, ...cuts, Infinity];
   return GRADES.map((g, i) => ({ from: edges[i], to: edges[i + 1], grade: g }));
+}
+
+// 1분 기록을 N분 구간 평균으로 묶음
+// 점은 구간이 끝나는 시각에 찍고, 아직 안 끝난 마지막 구간은 가장 최근 기록 시각에 찍음 (→ 끝 점은 계속 움직임)
+function bucketLogs(logs, bucketMs, nowMs){
+  const groups = new Map();
+  for(const log of logs){
+    const t = tsMs(log.timestamp);
+    const start = Math.floor(t / bucketMs) * bucketMs;
+    if(!groups.has(start)) groups.set(start, { start, last: t, sum: {}, n: {} });
+    const g = groups.get(start);
+    g.last = Math.max(g.last, t);
+    for(const k of INDOOR_KEYS){
+      const v = (log.indoor || {})[k];
+      if(!has(v)) continue;
+      g.sum[k] = (g.sum[k] || 0) + v;
+      g.n[k] = (g.n[k] || 0) + 1;
+    }
+  }
+  return [...groups.values()].sort((a, b) => a.start - b.start).map(g => {
+    const indoor = {};
+    for(const k in g.sum){
+      const avg = g.sum[k] / g.n[k];
+      indoor[k] = k === 'co2' ? Math.round(avg) : Math.round(avg * 10) / 10;
+    }
+    const end = g.start + bucketMs;
+    return { x: end <= nowMs ? end : g.last, from: g.start, indoor };
+  });
+}
+
+// 요약 페이지 (차트에서 고른 항목·기간과 상관없이 전체 항목)
+// - 환기 효과: 마지막으로 창문이 열렸다 닫힌 구간의 전후 비교 (서버가 계산)
+// - 나머지: 최근 1시간의 1분 기록으로 계산
+const SUMMARY_KEYS = ['co2', 'pm25', 'pm10'];
+
+// 환기 효과 상자
+function ventBoxHtml(vent){
+  if(!vent){
+    return `<div class="vent-box">
+      <div class="vent-when">환기 효과</div>
+      <div class="vent-headline">아직 환기 기록이 없어요</div>
+      <div class="vent-note">창문이 열렸다 닫히면 얼마나 좋아졌는지 보여드려요</div>
+    </div>`;
+  }
+  const today = (lastState.server_time || '').slice(0, 10);
+  const day = ts => (today && ts.slice(0, 10) !== today) ? '어제 ' : '';
+  const at = ts => day(ts) + hhmm(tsMs(ts));
+  const when = vent.ongoing
+    ? `지금 환기 중 · ${at(vent.start)}부터 (${vent.minutes}분째)`
+    : `마지막 환기 · ${at(vent.start)} ~ ${hhmm(tsMs(vent.end))} (${vent.minutes}분)`;
+
+  const items = SUMMARY_KEYS
+    .map(key => ({ m: METRICS[key], a: vent.before[key], b: vent.after[key] }))
+    .filter(it => has(it.a) && has(it.b))
+    .map(it => ({ ...it, pct: it.a > 0 ? Math.round((it.b - it.a) / it.a * 100) : 0 }));
+
+  // 한 줄 요약: 가장 많이 줄어든 항목 → 없으면 가장 많이 늘어난 항목 (나빠진 것도 그대로 알림)
+  const best = items.reduce((x, it) => (!x || it.pct < x.pct) ? it : x, null);
+  const worst = items.reduce((x, it) => (!x || it.pct > x.pct) ? it : x, null);
+  let headline = vent.ongoing ? '아직 큰 변화가 없어요' : '환기 전후로 큰 변화가 없었어요';
+  if(best && best.pct <= -5){
+    headline = `${best.m.name}가 ${-best.pct}% ${vent.ongoing ? '줄고 있어요' : '줄었어요'}`;
+  } else if(worst && worst.pct >= 5){
+    headline = vent.ongoing ? `${worst.m.name}가 늘고 있어요` : `환기했지만 ${worst.m.name}가 늘었어요`;
+  }
+
+  const num = v => Math.round(v).toLocaleString();
+  const delta = pct => pct <= -1 ? `<span class="vent-delta down">▼${-pct}%</span>`
+                     : pct >= 1  ? `<span class="vent-delta up">▲${pct}%</span>`
+                     :             `<span class="vent-delta">-</span>`;
+  const rows = items.map(it => `
+      <div class="vent-row">
+        <span class="vent-name">${it.m.name}</span>
+        <span class="vent-vals">${num(it.a)} → ${num(it.b)}<span class="unit">${it.m.unit}</span></span>
+        ${delta(it.pct)}
+      </div>`).join('');
+
+  return `<div class="vent-box">
+      <div class="vent-when">${when}</div>
+      <div class="vent-headline">${headline}</div>${rows}
+    </div>`;
+}
+
+function renderSummary(logs, vent, nowMs){
+  const box = $('summaryBody');
+  const rows = logs.map(l => ({ t: tsMs(l.timestamp), indoor: l.indoor || {} }));
+  const series = key => rows.map(r => ({ t: r.t, v: metricValue(r.indoor, key) })).filter(p => has(p.v));
+  const overall = series('overall');
+  const empty = '<div class="summary-empty">실내 센서 기록이 쌓이면<br>요약을 보여드릴게요</div>';
+  if(!overall.length){
+    box.innerHTML = vent ? ventBoxHtml(vent) + empty : empty;
+    return;
+  }
+
+  let html = ventBoxHtml(vent);
+
+  // 등급 비율 (종합 등급 기준. 기록이 1분에 하나 → 개수 = 분)
+  const counts = GRADES.map((g, i) => overall.filter(p => p.v === i).length);
+  const share = counts.map(c => Math.round(c / overall.length * 100));
+  html += `
+    <div class="sum-block">
+      <div class="sum-head"><span>등급 비율</span></div>
+      <div class="ratio-bar">${GRADES.map((g, i) => counts[i] ? `<i class="${g}" style="flex:${counts[i]}"></i>` : '').join('')}</div>
+      <div class="ratio-legend">${GRADES.map((g, i) => counts[i]
+        ? `<span><i class="dot ${g}"></i>${gradeLabel[g]} ${share[i]}%</span>` : '').join('')}</div>
+    </div>`;
+
+  // 지금 흐름: 최근 10분 평균 vs 그 전 10분 평균 (센서가 5분 넘게 조용하면 표시 안 함)
+  const mean = arr => arr.reduce((s, p) => s + p.v, 0) / arr.length;
+  const trendOf = (pts, m) => {
+    const end = pts[pts.length - 1].t;
+    const recent = pts.filter(p => p.t > end - 600000);
+    const before = pts.filter(p => p.t > end - 1200000 && p.t <= end - 600000);
+    if(nowMs - end > INDOOR_GAP_MS || recent.length < 3 || before.length < 3) return '';
+    const diff = mean(recent) - mean(before);
+    const edge = Math.max(mean(before) * 0.05, m.cuts[0] * 0.05);
+    return diff > edge ? '오르는 중 ↑' : diff < -edge ? '내려가는 중 ↓' : '비슷해요';
+  };
+
+  for(const key of SUMMARY_KEYS){
+    const m = METRICS[key];
+    const pts = series(key);
+    if(!pts.length) continue;
+    const peak = pts.reduce((a, p) => p.v > a.v ? p : a);
+    html += `
+    <div class="sum-block">
+      <div class="sum-head"><span>${m.name}</span><span class="sum-trend">${trendOf(pts, m)}</span></div>
+      <div class="sum-peak">최고 <b class="grade-text ${m.grade(peak.v)}">${Math.round(peak.v).toLocaleString()}</b><span class="unit">${m.unit}</span> · ${hhmm(peak.t)}</div>
+    </div>`;
+  }
+
+  const badMin = overall.filter(p => p.v >= 2).length;
+  const durText = min => min >= 60 ? `약 ${Math.floor(min / 60)}시간 ${min % 60}분` : `약 ${min}분`;
+  html += `<div class="row"><span class="row-label">나쁨 이상이었던 시간</span><span class="row-value">${badMin ? durText(badMin) : '없음'}</span></div>`;
+  box.innerHTML = html;
+}
+
+async function loadSummary(){
+  try {
+    const [res, ventRes] = await Promise.all([
+      api('/api/indoor-history?hours=1'),
+      api('/api/vent-effect'),
+    ]);
+    const nowMs = has(lastState.server_time) ? tsMs(lastState.server_time) : Date.now();
+    renderSummary(res.logs || [], ventRes.vent || null, nowMs);
+  } catch(e){
+    console.error('요약 로드 실패:', e);
+  }
 }
 
 // 차트 컨트롤
@@ -1304,6 +1466,11 @@ async function loadChart(animate=false){
     $('chartDesc').textContent = m.desc || `${m.name} (${m.unit}) · 배경색은 등급 구간이에요`;
     $('seriesLegend').hidden = !isCompare;
 
+    const nowMs = has(lastState.server_time) ? tsMs(lastState.server_time) : Date.now();
+    const bucketMs = (BUCKET_MIN[hours] || 0) * 60000;
+    $('bucketNote').hidden = !bucketMs;
+    $('bucketNote').textContent = `점 하나는 ${BUCKET_MIN[hours]}분 평균`;
+
     if(logs.length === 0 && airLogs.length === 0){
       if(indoorChart){ indoorChart.destroy(); indoorChart = null; }
       $('chartEmpty').hidden = false;
@@ -1313,11 +1480,10 @@ async function loadChart(animate=false){
     $('chartEmpty').hidden = true;
 
     // 데이터: {x: 시각(ms), y: 값}
-    const indoorPts = logs.map(log => ({
-      x: tsMs(log.timestamp),
-      y: metricValue(log.indoor || {}, valueKey),
-      indoor: log.indoor || {},
-    }));
+    const rawPts = bucketMs
+      ? bucketLogs(logs, bucketMs, nowMs)
+      : logs.map(log => ({ x: tsMs(log.timestamp), indoor: log.indoor || {} }));
+    const indoorPts = rawPts.map(p => ({ ...p, y: metricValue(p.indoor, valueKey) }));
     const outdoorPts = airLogs
       .filter(l => has(l.pm25))
       .map(l => ({ x: tsMs(l.timestamp), y: l.pm25 }));
@@ -1344,9 +1510,9 @@ async function loadChart(animate=false){
       borderWidth: 2.5,
       tension: isOverall ? 0 : 0.3,
       stepped: isOverall ? 'before' : false,
-      pointRadius: indoorPts.length <= 12 ? 3 : 0,
+      pointRadius: (bucketMs || indoorPts.length <= 12) ? 3 : 0,
       pointHoverRadius: 5,
-      spanGaps: INDOOR_GAP_MS,
+      spanGaps: bucketMs ? bucketMs * 1.5 : INDOOR_GAP_MS,   // 구간이 통째로 비면 선을 끊음
       fill: false,
     }];
     if(isCompare){
@@ -1405,7 +1571,11 @@ async function loadChart(animate=false){
             cornerRadius: 12,
             displayColors: false,
             callbacks: {
-              title: items => items.length ? hhmm(items[0].parsed.x) : '',
+              title: items => {
+                if(!items.length) return '';
+                const raw = items[0].raw;
+                return has(raw.from) ? `${hhmm(raw.from)}~${hhmm(raw.x)} 평균` : hhmm(items[0].parsed.x);
+              },
               label: function(ctx){
                 if(isCompare){
                   const v = ctx.parsed.y;
@@ -1462,6 +1632,8 @@ async function loadChart(animate=false){
 // 처음 로드 + 30초마다 자동 갱신
 loadChart(true);
 setInterval(loadChart, 30000);
+loadSummary();
+setInterval(loadSummary, 30000);
 </script>
 
 </body>
