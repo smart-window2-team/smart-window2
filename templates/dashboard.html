@@ -727,15 +727,27 @@ const WIN = {
 
 // 첫 화면에 보여줄 "사람 말" 이유 (서버의 기술적인 사유는 판단 근거 시트에서만)
 const RULE_TEXT = {
-  co2:          '실내 공기가 답답해서 환기하고 있어요',
-  indoor_pm:    '바깥 공기가 더 깨끗해서 환기하고 있어요',
-  good:         '바깥 공기가 좋아서 환기하고 있어요',
-  vent_short:   '바깥 공기가 나빠서 짧게만 환기하고 있어요',
-  vent_rest:    '환기를 마치고 잠시 쉬는 중이에요',
   wind:         '바람이 강해서 닫았어요',
   outdoor_bad:  '바깥 미세먼지가 나빠서 닫았어요',
   outdoor_vbad: '바깥 미세먼지가 심해서 닫았어요',
   no_data:      '날씨 정보를 못 받아서 안전하게 닫았어요',
+  idle:         '지금은 환기할 필요가 없어서 닫아 뒀어요',
+};
+// 환기 중: 왜 열었는지 (정기 환기 / 센서가 필요하다고 판단)
+const VENT_TEXT = {
+  schedule:  '정기 환기 중이에요',
+  co2:       '실내 공기가 답답해서 환기하고 있어요',
+  indoor_pm: '실내 미세먼지가 바깥보다 높아서 환기하고 있어요',
+};
+const VENT_SHORT_TEXT = {
+  schedule:  '바깥 공기가 나빠서 정기 환기를 짧게만 하고 있어요',
+  co2:       '바깥 공기가 나빠서 짧게만 환기하고 있어요',
+  indoor_pm: '바깥 공기가 나빠서 짧게만 환기하고 있어요',
+};
+// 환기 후 쉬는 중: 어떻게 끝났는지
+const REST_TEXT = {
+  early:   '충분히 환기돼서 닫았어요',
+  outdoor: '바깥 공기가 나빠져서 환기를 마쳤어요',
 };
 
 // 남은 시간: 2분 미만은 초, 그 이상은 분
@@ -743,14 +755,18 @@ const remainText = sec => sec < 120 ? `${sec}초` : `${Math.round(sec / 60)}분`
 
 function friendlyReason(s){
   if(s.source === 'auto'){
-    if(s.last_rule === 'rain') return (s.weather || {}).precipitation === 'snow' ? '눈이 와서 닫았어요' : '비가 와서 닫았어요';
-    let text = RULE_TEXT[s.last_rule];
-    if(text){
-      // 시간을 정해 여는 중이면 언제 닫히는지, 쉬는 중이면 언제 다시 판단하는지
-      if(s.window_status === 'open' && has(s.vent_remaining)) text += ` · ${remainText(s.vent_remaining)} 뒤 닫혀요`;
-      if(s.last_rule === 'vent_rest' && has(s.vent_rest_remaining)) text += ` · ${remainText(s.vent_rest_remaining)} 뒤 다시 판단해요`;
-      return text;
+    const rule = s.last_rule;
+    if(rule === 'rain') return (s.weather || {}).precipitation === 'snow' ? '눈이 와서 닫았어요' : '비가 와서 닫았어요';
+    if(rule === 'vent' || rule === 'vent_short'){
+      const text = (rule === 'vent_short' ? VENT_SHORT_TEXT : VENT_TEXT)[s.vent_trigger] || '환기하고 있어요';
+      return has(s.vent_remaining) ? `${text} · ${remainText(s.vent_remaining)} 뒤 닫혀요` : text;
     }
+    if(rule === 'vent_rest'){
+      const text = REST_TEXT[s.vent_end_reason] || '환기를 마치고 잠시 쉬는 중이에요';
+      return has(s.vent_rest_remaining) ? `${text} · ${remainText(s.vent_rest_remaining)} 뒤 다시 확인해요` : text;
+    }
+    if(rule === 'idle') return RULE_TEXT.idle + (s.next_vent_at ? ` · 다음 정기 환기 ${s.next_vent_at}` : '');
+    if(RULE_TEXT[rule]) return RULE_TEXT[rule];
   }
   if(s.source === 'timer') return '타이머가 끝나서 닫았어요';
   if(s.source === 'manual') return s.window_status === 'closed' ? '직접 닫았어요' : '직접 열었어요';
@@ -846,7 +862,7 @@ function renderChecks(s){
   if(differs){
     note.textContent = manual
       ? `자동 모드로 바꾸면 창문이 '${suggested.chip}' 상태가 돼요`
-      : `지금 값이면 '${suggested.chip}'이에요 · 다음 자동 판단(10분마다, 마지막 ${timeOf(s.decided_at)})에 반영돼요`;
+      : `지금 값이면 '${suggested.chip}'이에요 · 곧 반영돼요`;
   }
   $('checksList').innerHTML = checks.map(c => `
     <li class="check ${c.level}${c.decisive ? ' decisive' : ''}">
@@ -1025,7 +1041,7 @@ const EVENT_WINDOW = {
   half:   { title:'창문 반쯤 열림', cls:'half' },
   closed: { title:'창문 닫힘',      cls:'closed' },
 };
-const EVENT_KIND = { timer:'타이머', mode:'모드 변경', location:'위치 변경' };
+const EVENT_KIND = { timer:'타이머', mode:'모드 변경', location:'위치 변경', schedule:'정기 환기' };
 const SOURCE_SHORT = { auto:'자동', manual:'직접', timer:'타이머', system:'시스템' };
 
 // 오늘이면 "15:32", 아니면 "9/21 15:32"

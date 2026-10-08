@@ -1,10 +1,13 @@
 """기상청 + 에어코리아 API 호출"""
 import math
 import time
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 import requests
 
 from config import AIR_KOREA_KEY, KMA_KEY, FIXED_LAT, FIXED_LON
+
+
+KST = timezone(timedelta(hours=9))   # 서버가 어느 나라 시간으로 설정돼 있든 한국 시간 기준으로 조회
 
 
 def _safe_float(value):
@@ -126,12 +129,11 @@ def get_kma_weather(lat, lon):
     """기상청 초단기예보 (기존 실황값 + 하늘상태 SKY 포함)"""
     try:
         nx, ny = _latlon_to_grid(lat, lon)
-        now = datetime.now()
+        now = datetime.now(KST)
         # 초단기예보는 매시 45분에 발표됨 → 45분 이전이면 한 시간 전 발표분 사용
         if now.minute >= 45:
             base_dt = now
         else:
-            from datetime import timedelta
             base_dt = now - timedelta(hours=1)
         base_date = base_dt.strftime("%Y%m%d")
         base_time = base_dt.strftime("%H30")  # 예보 base_time은 'HH30'

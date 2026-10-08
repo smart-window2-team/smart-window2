@@ -85,8 +85,17 @@ state = {
     "timer_duration": None,      # ★ 추가: 설정한 시간 (초)
     "decided_at": None,          # ★ 추가: 마지막 자동 판단 시각
     "last_rule": None,           # ★ 추가: 마지막 자동 판단 규칙 (대시보드 '쉬운 말' 이유 표시용)
-    "vent_end_at": None,         # ★ 추가: 자동 '짧게 환기' 끝나는 시각 (ISO)
-    "vent_rest_until": None,     # ★ 추가: 짧은 환기 후 쉬는 시간 끝 (ISO)
+    # ── 자동 환기 진행 상태 ──
+    "vent_end_at": None,         # 지금 환기가 끝날 예정 시각 (ISO). None 이면 환기 중이 아님
+    "vent_started_at": None,     # 지금 환기를 시작한 시각 (ISO)
+    "vent_trigger": None,        # 지금 환기를 하는 이유: schedule(정기) / co2 / indoor_pm
+    "vent_short": False,         # 바깥이 나빠서 짧게(10분) 하는 환기인가
+    "vent_rest_until": None,     # 환기 후 쉬는 시간이 끝나는 시각 (ISO)
+    "vent_end_reason": None,     # 마지막 환기가 끝난 이유: time(시간 다 됨) / early(일찍 닫음) / outdoor(바깥 나빠짐)
+    "last_vent_end": None,       # 마지막 환기가 끝난 시각 (ISO)
+    "wind_hold": False,          # 강풍으로 닫아 둔 상태 (바람이 충분히 잦아들 때까지 유지)
+    "slot_done": None,           # 처리한 정기 환기 회차 ("2026-10-08 15:00")
+    "slot_pending": None,        # 정기 시각이 됐지만 아직 못 연 회차
     "updated_at": now_str(),
 }
 
@@ -96,13 +105,25 @@ LOG_INTERVAL_SECONDS = 60      # 1분에 한 번
 
 # ── 판단 기준값 (decide_window / explain_window 공통) ──────────────────────
 # 근거: CO₂ 1,000ppm = 실내공기질 관리법 유지기준 / 미세먼지 등급 = 환경부 예보 등급
+#       하루 3번 · 한 번에 30분(바깥이 나쁘면 10분) 환기 = 환경부 권고
 WIND_CLOSE = 5.0                  # 이상이면 강풍 → 닫힘
+WIND_REOPEN = 4.0                 # 강풍으로 닫은 뒤에는 이 아래로 내려가야 다시 열 수 있음 (열렸다 닫혔다 방지)
 CO2_VENT = 1000                   # 이상이면 환기 필요
 CO2_URGENT = 2000                 # 이상이면 바깥이 매우나빠도 짧게 환기
+CO2_CLEAR = 700                   # 미만이면 충분히 환기됨 → 일찍 닫기
 PM10_BAD, PM25_BAD = 80, 35       # 초과면 바깥 '나쁨' (환경부 예보 등급)
 PM10_VBAD, PM25_VBAD = 150, 75    # 초과면 바깥 '매우나쁨'
+INDOOR_PM_GAP = 5                 # 실내 미세먼지가 바깥보다 이만큼 이상 높고
+INDOOR_PM_MIN = {"pm25": 15, "pm10": 30}   # 이 값 이상일 때만 '실내가 더 탁함' (둘 다 깨끗한데 여는 것 방지)
+INDOOR_STALE_SECONDS = 300        # 센서값이 이보다 오래됐으면 판단에 쓰지 않음 (라즈베리파이 꺼짐)
+
+VENT_SCHEDULE = ("10:00", "15:00", "20:00")   # 정기 환기 시각 (하루 3번)
+SCHEDULE_WINDOW_SECONDS = 30 * 60 # 정기 시각에 비·강풍 등으로 못 열면 이 시간 동안 다시 시도, 지나면 그 회차는 건너뜀
+SCHEDULE_SKIP_SECONDS = 60 * 60   # 정기 시각 전 이 시간 안에 환기했으면 그 회차는 생략
+VENT_SECONDS = 30 * 60            # 한 번 환기하는 시간 (바깥 좋음·보통)
 SHORT_VENT_SECONDS = 10 * 60      # 바깥이 나쁠 때 짧게 여는 시간
-VENT_REST_SECONDS = 30 * 60       # 짧은 환기 뒤 다시 짧게 열지 않는 쉬는 시간
+EARLY_CLOSE_SECONDS = 10 * 60     # 이만큼은 열어 둔 뒤에야 '일찍 닫기' 가능
+VENT_REST_SECONDS = 30 * 60       # 환기 뒤 다시 열지 않고 쉬는 시간
 
 
 def outdoor_level(air):
@@ -118,120 +139,177 @@ def outdoor_level(air):
 
 
 def indoor_dirtier(indoor, air):
-    """실내 미세먼지가 바깥보다 높은 항목 (name, 실내, 바깥) 또는 None"""
+    """실내 미세먼지가 바깥보다 확실히 높은 항목 (name, 실내, 바깥) 또는 None"""
     for key, name in (("pm10", "PM10"), ("pm25", "PM2.5")):
         i_v, o_v = indoor.get(key), air.get(key)
-        if i_v is not None and o_v is not None and i_v > o_v:
+        if i_v is not None and o_v is not None and i_v >= INDOOR_PM_MIN[key] and i_v - o_v >= INDOOR_PM_GAP:
             return name, i_v, o_v
     return None
 
 
+def usable_indoor(indoor, now_dt):
+    """판단에 쓸 실내 센서값. 마지막 수신이 오래됐으면(라즈베리파이 꺼짐) 빈 값"""
+    if not indoor:
+        return {}
+    try:
+        seen = datetime.strptime(indoor["updated_at"], "%Y-%m-%d %H:%M:%S").replace(tzinfo=KST)
+    except (KeyError, TypeError, ValueError):
+        return indoor
+    return indoor if (now_dt - seen).total_seconds() <= INDOOR_STALE_SECONDS else {}
+
+
+def vent_seconds(short):
+    """한 번 환기하는 시간(초). 환기 주기 테스트 모드에서는 테스트 값"""
+    if VENT_CYCLE_TEST:
+        return VENT_CYCLE_OPEN_SECONDS
+    return SHORT_VENT_SECONDS if short else VENT_SECONDS
+
+
+def rest_seconds():
+    return VENT_CYCLE_CLOSE_SECONDS if VENT_CYCLE_TEST else VENT_REST_SECONDS
+
+
+def dur_text(seconds):
+    return f"{seconds // 60}분" if seconds >= 120 else f"{seconds}초"
+
+
+# ── 정기 환기 시각 ─────────────────────────────────────────────────────────
+def _slot_times(day):
+    for hhmm in VENT_SCHEDULE:
+        hour, minute = map(int, hhmm.split(":"))
+        yield day.replace(hour=hour, minute=minute, second=0, microsecond=0)
+
+
+def current_slot(now_dt):
+    """지금이 정기 환기 시간대(정기 시각 ~ +30분) 안이면 그 정기 시각, 아니면 None"""
+    for slot in _slot_times(now_dt):
+        if slot <= now_dt < slot + timedelta(seconds=SCHEDULE_WINDOW_SECONDS):
+            return slot
+    return None
+
+
+def next_slot(now_dt):
+    """다음 정기 환기 시각 (오늘 남은 게 없으면 내일 첫 회차)"""
+    later = [s for s in _slot_times(now_dt) if s > now_dt]
+    return later[0] if later else next(_slot_times(now_dt + timedelta(days=1)))
+
+
+def slot_key(slot):
+    return slot.strftime("%Y-%m-%d %H:%M")
+
+
 # ── 자동 판단 로직 ─────────────────────────────────────────────────────────
-def decide_window(weather, air, indoor=None):
-    """실외 기상/대기질 + 실내 센서를 종합해 open/closed 판단 (반쯤 열림 없음)
+def judge_context(snap, now_dt, slot_due):
+    """상태 → decide_window 가 보는 '지금 상황'
+    vent: 진행 중인 환기 / resting: 환기 후 쉬는 중 / slot_due: 정기 환기를 할 차례"""
+    parse = lambda v: datetime.fromisoformat(v) if v else None
+    end, rest = parse(snap.get("vent_end_at")), parse(snap.get("vent_rest_until"))
+    vent = None
+    if end:
+        vent = {"started": parse(snap.get("vent_started_at")) or now_dt, "end": end,
+                "trigger": snap.get("vent_trigger") or "schedule", "short": bool(snap.get("vent_short"))}
+    slot = current_slot(now_dt)
+    return {
+        "now": now_dt, "vent": vent,
+        "resting": bool(rest and now_dt < rest),
+        "rest_left": max(0, round((rest - now_dt).total_seconds())) if rest else 0,
+        "wind_hold": bool(snap.get("wind_hold")),
+        "slot_due": slot_due,
+        "slot_label": slot.strftime("%H:%M") if slot else None,
+        "next_label": next_slot(now_dt).strftime("%H:%M"),
+    }
+
+
+def decide_window(weather, air, indoor=None, ctx=None):
+    """바깥 날씨·대기질 + 실내 센서 + 지금 상황(ctx)으로 open/closed 판단
+    순서: ① 안전(비·강풍·바깥 매우나쁨) → ② 일정(정기 환기) → ③ 센서(환기가 필요할 때)
     rule: 어떤 규칙으로 결정됐는지 (대시보드 '판단 근거'·'쉬운 말' 이유 표시용)
-    vent_short 규칙은 '짧게 열기' → 실제 열고 닫는 시간은 plan_window가 처리
-    trigger: 환기가 필요한 이유 (co2 / indoor_pm)"""
+      no_data / rain / wind / outdoor_vbad / outdoor_bad : 닫힘
+      vent(30분) / vent_short(10분) : 시간을 정해 열림.  trigger: schedule / co2 / indoor_pm
+      vent_rest : 환기 후 쉬는 중이라 닫힘 / idle : 환기할 필요가 없어 닫힘
+    start: 새로 환기를 시작함 / ended: 진행 중이던 환기를 끝냄 (time / early / outdoor)"""
+    ctx = ctx or {}
+    now_dt = ctx.get("now") or datetime.now(KST)
+    vent = ctx.get("vent")
+    closed = lambda rule, reason, **more: {"window_status": "closed", "rule": rule, "reason": reason, **more}
+
     if not weather or not air:
-        return {"window_status": "closed", "reason": "데이터 수신 실패 → 안전모드",
-                "rule": "no_data"}
+        return closed("no_data", "데이터 수신 실패 → 안전모드")
 
     wind = weather.get("wind_speed") or 0
     pty = weather.get("precipitation_code", 0)
-    pm10 = air.get("pm10")
-    pm25 = air.get("pm25")
-
-    # // 실내 센서를 이용한 창문 열림 정의 부분 //
+    pm10, pm25 = air.get("pm10"), air.get("pm25")
     indoor = indoor or {}
     co2 = indoor.get("co2")
     dirty = indoor_dirtier(indoor, air)
     level = outdoor_level(air)
 
-    # 우선순위: 강수 > 강풍 > 바깥 미세먼지(위험 비교) > 환기 필요 > 양호
+    # ── ① 안전: 언제든 닫음 (환기 중이어도 중단) ──
     if pty != 0:
-        return {"window_status": "closed",
-                "reason": f"강수({weather.get('precipitation')}) → 닫힘", "rule": "rain"}
+        return closed("rain", f"강수({weather.get('precipitation')}) → 닫힘")
+    if wind >= WIND_CLOSE or (ctx.get("wind_hold") and wind >= WIND_REOPEN):
+        return closed("wind", f"강풍({wind}m/s) → 닫힘")
 
-    if wind >= WIND_CLOSE:
-        return {"window_status": "closed",
-                "reason": f"강풍({wind}m/s) → 닫힘", "rule": "wind"}
+    # ── 환기 중: 계속 열어 둘지, 끝낼지 ──
+    if vent:
+        elapsed = (now_dt - vent["started"]).total_seconds()
+        done = lambda ended, reason: closed("vent_rest", reason, ended=ended, trigger=vent["trigger"])
+        if now_dt >= vent["end"]:
+            return done("time", "환기 끝 → 닫힘")
+        if level == "vbad" and not (vent["short"] and vent["trigger"] == "co2"):
+            return done("outdoor", f"바깥 매우나쁨(PM2.5 {pm25}) → 환기 종료")
+        if level == "bad" and elapsed >= SHORT_VENT_SECONDS:
+            return done("outdoor", f"바깥 나쁨(PM2.5 {pm25}) → 환기 종료")
+        if (level not in ("bad", "vbad") and elapsed >= EARLY_CLOSE_SECONDS
+                and co2 is not None and co2 < CO2_CLEAR and not dirty):
+            return done("early", f"충분히 환기됨(CO₂ {co2:.0f}ppm) → 일찍 닫힘")
+        return {"window_status": "open", "rule": "vent_short" if vent["short"] else "vent",
+                "trigger": vent["trigger"], "reason": "환기 중"}
 
-    # 바깥 매우나쁨: 미세먼지 위해성이 더 크므로 닫음. CO₂가 매우 높을 때만 짧게 환기
-    if level == "vbad":
-        if co2 is not None and co2 >= CO2_URGENT:
-            return {"window_status": "open", "rule": "vent_short", "trigger": "co2",
-                    "reason": f"바깥 매우나쁨(PM2.5 {pm25}) + CO₂ 매우 높음({co2}ppm) → 짧게 환기"}
-        return {"window_status": "closed", "rule": "outdoor_vbad",
-                "reason": f"대기질 매우나쁨(PM10={pm10}, PM2.5={pm25}) → 닫힘"}
+    # ── 환기 후 쉬는 중: 다시 열지 않음 ──
+    if ctx.get("resting"):
+        return closed("vent_rest", "환기 후 쉬는 시간 → 닫힘")
 
-    # 바깥 나쁨: 환기가 필요할 때만 짧게, 아니면 닫음
-    if level == "bad":
-        if co2 is not None and co2 >= CO2_VENT:
-            return {"window_status": "open", "rule": "vent_short", "trigger": "co2",
-                    "reason": f"바깥 나쁨(PM2.5 {pm25}) + CO₂ 높음({co2}ppm) → 짧게 환기"}
-        if dirty:
-            name, i_v, o_v = dirty
-            return {"window_status": "open", "rule": "vent_short", "trigger": "indoor_pm",
-                    "reason": f"바깥 나쁨 + 실내 {name}({i_v}) > 바깥({o_v}) → 짧게 환기"}
-        return {"window_status": "closed", "rule": "outdoor_bad",
-                "reason": f"대기질 나쁨(PM10={pm10}, PM2.5={pm25}) → 닫힘"}
-
-    # 바깥 좋음·보통
+    # ── 닫혀 있음: 환기를 시작할지 ──
+    need = None                                       # 센서가 본 '환기가 필요한 이유'
     if co2 is not None and co2 >= CO2_VENT:
-        return {"window_status": "open",
-                "reason": f"CO₂ 높음({co2}ppm) → 환기 필수, 열림", "rule": "co2"}
+        need = ("co2", f"CO₂ 높음({co2:.0f}ppm)")
+    elif dirty:
+        need = ("indoor_pm", f"실내 {dirty[0]}({dirty[1]}) > 바깥({dirty[2]})")
+    regular = ("schedule", f"정기 환기({ctx.get('slot_label')})") if ctx.get("slot_due") else None
 
-    if dirty:
-        name, i_v, o_v = dirty
-        return {"window_status": "open", "rule": "indoor_pm",
-                "reason": f"실내 {name}({i_v}) > 외부({o_v}) → 환기, 열림"}
+    if level == "vbad":                               # 미세먼지 위해성이 더 큼 → CO₂가 매우 높을 때만 짧게
+        if co2 is None or co2 < CO2_URGENT:
+            return closed("outdoor_vbad", f"대기질 매우나쁨(PM10={pm10}, PM2.5={pm25}) → 닫힘")
+        want, short, lead = ("co2", f"CO₂ 매우 높음({co2:.0f}ppm)"), True, f"바깥 매우나쁨(PM2.5 {pm25}) + "
+    elif level == "bad":                              # 필요하거나 정기 시각일 때만 짧게
+        want, short, lead = need or regular, True, f"바깥 나쁨(PM2.5 {pm25}) + "
+        if not want:
+            return closed("outdoor_bad", f"대기질 나쁨(PM10={pm10}, PM2.5={pm25}) → 닫힘")
+    else:                                             # 바깥 좋음·보통: ③ 센서 → ② 일정
+        want, short, lead = need or regular, False, ""
+        if not want:
+            return closed("idle", "환기 필요 없음 → 닫힘")
 
-    return {"window_status": "open", "reason": "열림", "rule": "good"}
-
-
-def is_timed_open(decision):
-    """시간을 정해 두고 여는 판단인가
-    - 평소: 바깥이 나쁠 때의 '짧게 환기'(vent_short)만
-    - 환기 주기 테스트 모드: 모든 '열기' 판단"""
-    return decision["rule"] == "vent_short" or (VENT_CYCLE_TEST and decision["window_status"] == "open")
-
-
-def vent_times():
-    """(여는 시간, 닫고 쉬는 시간) 초"""
-    if VENT_CYCLE_TEST:
-        return VENT_CYCLE_OPEN_SECONDS, VENT_CYCLE_CLOSE_SECONDS
-    return SHORT_VENT_SECONDS, VENT_REST_SECONDS
-
-
-def plan_window(decision, now_dt, vent_end_at, vent_rest_until):
-    """decide_window 결과에 '시간을 정해 열기' 규칙 적용
-    - 환기 중이면 계속 열어둠
-    - 환기를 마치고 쉬는 시간이면 닫아둠 (rule: vent_rest)
-    vent_end_at / vent_rest_until: ISO 문자열 또는 None"""
-    if not is_timed_open(decision):
-        return decision
-    end = datetime.fromisoformat(vent_end_at) if vent_end_at else None
-    rest = datetime.fromisoformat(vent_rest_until) if vent_rest_until else None
-    if end and now_dt < end:
-        return decision
-    if rest and now_dt < rest:
-        return {**decision, "window_status": "closed", "rule": "vent_rest",
-                "reason": "짧은 환기 후 쉬는 시간 → 닫힘"}
-    return decision
+    trigger, why = want
+    return {"window_status": "open", "rule": "vent_short" if short else "vent", "trigger": trigger,
+            "short": short, "start": True,
+            "reason": f"{lead}{why} → {dur_text(vent_seconds(short))} 환기"}
 
 
 PRECIP_KO = {"rain": "비", "rain_snow": "비/눈", "snow": "눈", "drizzle": "빗방울",
              "sleet": "진눈깨비", "flurry": "눈날림"}
 
 
-def explain_window(weather, air, indoor, decision):
+def explain_window(weather, air, indoor, decision, ctx=None):
     """대시보드 '판단 근거' 체크리스트. decide_window와 같은 기준값 사용
-    level: ok(문제 없음) / warn(주의) / close(닫을 이유) / open(열 이유) / none(데이터 없음)
+    level: ok(문제 없음) / warn(주의) / close(닫을 이유) / open(열 이유) / none(해당 없음·데이터 없음)
     decisive: 이번 결정을 만든 항목"""
-    weather, air, indoor = weather or {}, air or {}, indoor or {}
+    weather, air, indoor, ctx = weather or {}, air or {}, indoor or {}, ctx or {}
     rule = decision.get("rule")
     trigger = decision.get("trigger")
-    short = rule in ("vent_short", "vent_rest")      # 바깥이 나빠서 짧게 환기하는 경우
+    venting = rule in ("vent", "vent_short")
+    short = rule == "vent_short"                     # 바깥이 나빠서 짧게 환기하는 경우
     num = lambda v: f"{round(v):,}"
     checks = []
 
@@ -254,38 +332,12 @@ def explain_window(weather, air, indoor, decision):
         add("wind", "none", "풍속 정보가 없어요", "")
     elif wind >= WIND_CLOSE:
         add("wind", "close", "바람이 강해요", f"{wind:.1f}m/s", rule == "wind")
+    elif ctx.get("wind_hold") and wind >= WIND_REOPEN:
+        add("wind", "close", "바람이 아직 강해요", f"{wind:.1f}m/s · {WIND_REOPEN:.0f}m/s 아래가 되면 다시 확인", rule == "wind")
     else:
         add("wind", "ok", "바람이 괜찮아요", f"{wind:.1f}m/s")
 
-    # 3) 실내 CO2
-    co2 = indoor.get("co2")
-    co2_decisive = rule == "co2" or (short and trigger == "co2")
-    if co2 is None:
-        add("co2", "none", "실내 CO₂ 측정값이 없어요", "")
-    elif co2 >= CO2_URGENT:
-        add("co2", "open", "실내 CO₂가 매우 높아요", f"{num(co2)}ppm", co2_decisive)
-    elif co2 >= CO2_VENT:
-        add("co2", "open", "실내 CO₂가 높아요", f"{num(co2)}ppm", co2_decisive)
-    else:
-        add("co2", "ok", "실내 CO₂는 괜찮아요", f"{num(co2)}ppm")
-
-    # 4) 실내 vs 바깥 미세먼지
-    pairs = [(indoor.get("pm25"), air.get("pm25"), "PM2.5"),
-             (indoor.get("pm10"), air.get("pm10"), "PM10")]
-    pairs = [p for p in pairs if p[0] is not None and p[1] is not None]
-    if not pairs:
-        add("indoor_pm", "none", "실내·바깥 미세먼지를 비교할 수 없어요", "")
-    else:
-        dirty = [p for p in pairs if p[0] > p[1]]
-        i_v, o_v, name = (dirty or pairs)[0]
-        detail = f"{name} 실내 {num(i_v)} · 바깥 {num(o_v)}"
-        if dirty:
-            add("indoor_pm", "open", "실내가 바깥보다 탁해요", detail,
-                rule == "indoor_pm" or (short and trigger == "indoor_pm"))
-        else:
-            add("indoor_pm", "ok", "실내가 바깥보다 깨끗해요", detail)
-
-    # 5) 바깥 대기질
+    # 3) 바깥 대기질
     pm10, pm25 = air.get("pm10"), air.get("pm25")
     level = outdoor_level(air)
     if level is None:
@@ -298,6 +350,45 @@ def explain_window(weather, air, indoor, decision):
             add("outdoor", "warn", "바깥 공기가 나빠요", detail, rule == "outdoor_bad" or short)
         else:
             add("outdoor", "ok", "바깥 공기가 괜찮아요", detail)
+
+    # 4) 정기 환기 (하루 3번)
+    if not VENT_CYCLE_TEST:
+        if venting and trigger == "schedule":
+            add("schedule", "open", "정기 환기 시간이에요", ctx.get("slot_label") or "", True)
+        elif ctx.get("slot_due"):
+            add("schedule", "warn", "정기 환기 시간이지만 지금은 열 수 없어요", ctx.get("slot_label") or "")
+        else:
+            add("schedule", "none", "정기 환기 시간이 아니에요", f"다음 {ctx.get('next_label') or '-'}")
+
+    # 5) 실내 CO2
+    co2 = indoor.get("co2")
+    co2_decisive = venting and trigger == "co2"
+    if co2 is None:
+        add("co2", "none", "실내 CO₂ 측정값이 없어요", "")
+    elif co2 >= CO2_URGENT:
+        add("co2", "open", "실내 CO₂가 매우 높아요", f"{num(co2)}ppm", co2_decisive)
+    elif co2 >= CO2_VENT:
+        add("co2", "open", "실내 CO₂가 높아요", f"{num(co2)}ppm", co2_decisive)
+    else:
+        add("co2", "ok", "실내 CO₂는 괜찮아요", f"{num(co2)}ppm")
+
+    # 6) 실내 vs 바깥 미세먼지
+    pairs = [(indoor.get("pm25"), air.get("pm25"), "PM2.5"),
+             (indoor.get("pm10"), air.get("pm10"), "PM10")]
+    pairs = [p for p in pairs if p[0] is not None and p[1] is not None]
+    dirty = indoor_dirtier(indoor, air)
+    if not pairs:
+        add("indoor_pm", "none", "실내·바깥 미세먼지를 비교할 수 없어요", "")
+    elif dirty:
+        add("indoor_pm", "open", "실내가 바깥보다 탁해요", f"{dirty[0]} 실내 {num(dirty[1])} · 바깥 {num(dirty[2])}",
+            venting and trigger == "indoor_pm")
+    else:
+        i_v, o_v, name = pairs[0]
+        add("indoor_pm", "ok", "실내 미세먼지는 괜찮아요", f"{name} 실내 {num(i_v)} · 바깥 {num(o_v)}")
+
+    # 7) 환기 후 쉬는 시간
+    if ctx.get("resting"):
+        add("rest", "warn", "환기 후 쉬는 중이에요", f"{dur_text(ctx.get('rest_left', 0))} 남음", rule == "vent_rest")
 
     return checks
 
@@ -390,37 +481,107 @@ def run_auto_cycle():
     return decision
 
 
+SKIP_WHY = {"rain": "비·눈이 와서", "wind": "바람이 강해서",
+            "outdoor_vbad": "바깥 공기가 매우 나빠서", "no_data": "날씨 정보를 못 받아서"}
+
+
+def update_schedule(now_dt):
+    """정기 환기 회차 관리 (state_lock 을 잡은 채로 호출)
+    돌려주는 값: (지금 정기 환기를 할 차례인가, 활동 기록에 남길 말들)
+    - 정기 시각 전 1시간 안에 환기했으면 그 회차는 생략
+    - 비·강풍 등으로 못 열면 30분 동안 다시 시도하고, 그래도 못 열면 건너뜀"""
+    if VENT_CYCLE_TEST:
+        return True, []                                # 테스트 모드: 쉬는 시간만 끝나면 늘 정기 환기 차례
+    notes = []
+    slot = current_slot(now_dt)
+    key = slot_key(slot) if slot else None
+
+    pending = state.get("slot_pending")
+    if pending and pending != key:                     # 시간대가 끝날 때까지 못 열었음
+        why = SKIP_WHY.get(state.get("last_rule"), "조건이 맞지 않아")
+        notes.append(f"{why} {pending[-5:]} 정기 환기를 건너뛰었어요")
+        state["slot_pending"] = None
+
+    if not key or state.get("slot_done") == key:
+        return False, notes
+
+    if state.get("slot_pending") != key:               # 이 회차를 처음 봄
+        last_end = state.get("last_vent_end")
+        recent = last_end and (slot - datetime.fromisoformat(last_end)).total_seconds() < SCHEDULE_SKIP_SECONDS
+        if state.get("vent_end_at") or recent:
+            state["slot_done"] = key
+            notes.append(f"방금 환기해서 {key[-5:]} 정기 환기는 건너뛰었어요")
+            return False, notes
+        state["slot_pending"] = key
+    return True, notes
+
+
+def slot_due_now(snap, now_dt):
+    """정기 환기 차례인가 (상태를 바꾸지 않고 보기만 — 대시보드 표시용)"""
+    if VENT_CYCLE_TEST:
+        return True
+    slot = current_slot(now_dt)
+    return bool(slot) and snap.get("slot_done") != slot_key(slot)
+
+
+def clear_vent():
+    """진행 중인 자동 환기 정보 지우기 (state_lock 을 잡은 채로 호출)"""
+    state["vent_end_at"] = None
+    state["vent_started_at"] = None
+    state["vent_trigger"] = None
+    state["vent_short"] = False
+
+
 def apply_auto_decision(weather, air, indoor, quiet=False):
     """판단하고 그 결과를 상태에 반영
     quiet=True: 1초마다 다시 볼 때 사용. 바뀐 게 없으면 아무것도 건드리지 않음"""
     now_dt = datetime.now(KST)
     with state_lock:
-        decision = plan_window(decide_window(weather, air, indoor), now_dt,
-                               state.get("vent_end_at"), state.get("vent_rest_until"))
+        # 강풍으로 닫았으면 바람이 충분히 잦아들 때까지 유지
+        wind = (weather or {}).get("wind_speed") or 0
+        state["wind_hold"] = wind >= WIND_CLOSE or (bool(state.get("wind_hold")) and wind >= WIND_REOPEN)
+
+        slot_due, notes = update_schedule(now_dt)
+        ctx = judge_context(state, now_dt, slot_due)
+        decision = decide_window(weather, air, usable_indoor(indoor, now_dt), ctx)
+
         prev_status = state["window_status"]
-        timed = is_timed_open(decision)
-        starting = timed and not state.get("vent_end_at")     # 시간 정해 열기를 새로 시작
+        was_venting = bool(state.get("vent_end_at"))
+        starting = bool(decision.get("start"))
         changed = starting or prev_status != decision["window_status"] or state.get("last_rule") != decision["rule"]
-        if quiet and not changed:
-            return decision
 
-        # ★ 시간 정해 열기: 새로 시작할 때만 끝나는 시각을 정함 / 다른 판단이면 취소
-        if timed:
-            if starting:
-                open_seconds, _ = vent_times()
-                state["vent_end_at"] = (now_dt + timedelta(seconds=open_seconds)).isoformat()
-        else:
-            state["vent_end_at"] = None
-        state["window_status"] = decision["window_status"]
-        state["decided_at"] = now_str()
-        state["last_rule"] = decision["rule"]
-        state["last_reason"] = decision["reason"]
-        state["source"] = "auto"
-        state["updated_at"] = now_str()
+        if changed or not quiet:
+            if starting:                               # 새 환기 시작: 끝나는 시각을 정함
+                seconds = vent_seconds(decision["short"])
+                state["vent_started_at"] = now_dt.isoformat()
+                state["vent_end_at"] = (now_dt + timedelta(seconds=seconds)).isoformat()
+                state["vent_trigger"] = decision["trigger"]
+                state["vent_short"] = decision["short"]
+                slot = current_slot(now_dt)
+                if slot:                               # 정기 시간대에 한 환기는 그 회차를 한 것으로 침
+                    state["slot_done"] = slot_key(slot)
+                    state["slot_pending"] = None
+            elif was_venting and decision["window_status"] == "closed":   # 환기 끝 → 쉬는 시간 시작
+                clear_vent()
+                state["last_vent_end"] = now_dt.isoformat()
+                state["vent_end_reason"] = decision.get("ended")
+                state["vent_rest_until"] = (now_dt + timedelta(seconds=rest_seconds())).isoformat()
+            state["window_status"] = decision["window_status"]
+            state["decided_at"] = now_str()
+            state["last_rule"] = decision["rule"]
+            state["last_reason"] = decision["reason"]
+            state["source"] = "auto"
+            state["updated_at"] = now_str()
 
-    print(f"[AUTO {now_str()}] {decision['reason']}" + (f" → {vent_times()[0]}초 뒤 닫힘" if starting else ""))
+    for note in notes:
+        print(f"[AUTO {now_str()}] {note}")
+        add_event("schedule", note, "auto")
+    if quiet and not changed:
+        return decision
 
-    # 자동 판단은 상태가 바뀔 때만 기록 (10분마다 같은 기록이 쌓이지 않게)
+    print(f"[AUTO {now_str()}] {decision['reason']}")
+
+    # 자동 판단은 상태가 바뀔 때만 기록 (같은 기록이 계속 쌓이지 않게)
     if prev_status != decision["window_status"]:
         add_event("window", decision["reason"], "auto", decision["window_status"])
     return decision
@@ -449,28 +610,9 @@ def auto_worker():
         else:
             stop_event.wait(1)
 
-def end_short_vent(now_dt):
-    """자동 모드 '짧게 환기' 시간이 끝났으면 닫고 쉬는 시간 시작 (끝냈으면 True)"""
-    with state_lock:
-        vent_end = state.get("vent_end_at")
-        if not vent_end or state["mode"] != "auto" or now_dt < datetime.fromisoformat(vent_end):
-            return False
-        state["window_status"] = "closed"
-        state["vent_end_at"] = None
-        rest_seconds = vent_times()[1]
-        state["vent_rest_until"] = (now_dt + timedelta(seconds=rest_seconds)).isoformat()
-        state["last_rule"] = "vent_rest"
-        state["last_reason"] = "환기 끝 → 닫힘"
-        state["source"] = "auto"
-        state["updated_at"] = now_str()
-    print(f"[AUTO {now_str()}] 환기 끝 → 닫힘 ({rest_seconds}초 쉬기)")
-    add_event("window", "환기 끝 → 닫고 쉬는 중", "auto", "closed")
-    return True
-
-
-def recheck_in_cycle_test():
-    """환기 주기 테스트 모드: 서버가 가진 지금 값으로 다시 판단 (외부 API 호출 없음)
-    → 쉬는 시간이 끝나면 바로 다시 열고, 환기 중에 비가 오면 바로 닫음"""
+def recheck_auto():
+    """자동 모드: 서버가 가진 지금 값으로 다시 판단 (외부 API 호출 없음, 1초마다)
+    → 환기 끝·일찍 닫기·정기 시각·실내 공기 악화에 바로 반응. 바깥 정보는 auto_worker 가 10분마다 새로 받음"""
     with state_lock:
         if state["mode"] != "auto":
             return
@@ -494,13 +636,11 @@ def cleanup_daily():
 
 
 def timer_worker():
-    """수동 모드 타이머 / 자동 모드 '짧게 환기' 만료 체크 (1초마다)"""
+    """수동 모드 타이머 만료 체크 / 자동 모드 다시 판단 (1초마다)"""
     while not stop_event.is_set():
         try:
             cleanup_daily()
-            end_short_vent(datetime.now(KST))
-            if VENT_CYCLE_TEST:
-                recheck_in_cycle_test()
+            recheck_auto()
 
             with state_lock:
                 timer_end = state.get("timer_end_at")
@@ -573,17 +713,19 @@ async def get_status():
       → 마지막 자동 판단 이후 센서값이 바뀌었거나 수동 모드여도 항상 최신"""
     with state_lock:
         snap = dict(state)
-    live = plan_window(decide_window(snap["weather"], snap["air"], snap["indoor"]),
-                       datetime.now(KST), snap.get("vent_end_at"), snap.get("vent_rest_until"))
-    snap["checks"] = explain_window(snap["weather"], snap["air"], snap["indoor"], live)
+    now_dt = datetime.now(KST)
+    indoor_now = usable_indoor(snap["indoor"], now_dt)
+    ctx = judge_context(snap, now_dt, slot_due_now(snap, now_dt))
+    live = decide_window(snap["weather"], snap["air"], indoor_now, ctx)
+    snap["checks"] = explain_window(snap["weather"], snap["air"], indoor_now, live, ctx)
     snap["suggested_status"] = live["window_status"]
     snap["server_time"] = now_str()
     # 환기 남은 시간 / 쉬는 시간 남은 시간 (초). 해당 없으면 None
-    now_dt = datetime.now(KST)
     remain = lambda iso: max(0, round((datetime.fromisoformat(iso) - now_dt).total_seconds())) if iso else None
     snap["vent_remaining"] = remain(snap.get("vent_end_at"))
     rest = remain(snap.get("vent_rest_until"))
     snap["vent_rest_remaining"] = rest if rest else None
+    snap["next_vent_at"] = None if VENT_CYCLE_TEST else ctx["next_label"]      # 다음 정기 환기 시각 "HH:MM"
     snap["vent_cycle_test"] = VENT_CYCLE_TEST
     return snap
 
@@ -608,7 +750,8 @@ async def set_mode(req: ModeRequest):
     with state_lock:
         changed = state["mode"] != req.mode
         state["mode"] = req.mode
-        state["vent_end_at"] = None      # ★ 자동 '짧게 환기' 진행 중이었다면 취소
+        clear_vent()                     # ★ 자동 환기 진행 중이었다면 취소
+        state["slot_pending"] = None
         state["updated_at"] = now_str()
 
     if changed:
