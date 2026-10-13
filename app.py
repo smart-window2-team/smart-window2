@@ -6,6 +6,7 @@ from fastapi.staticfiles import StaticFiles
 import json
 import os
 import threading
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 
@@ -96,6 +97,10 @@ state = {
     "wind_hold": False,          # 강풍으로 닫아 둔 상태 (바람이 충분히 잦아들 때까지 유지)
     "slot_done": None,           # 처리한 정기 환기 회차 ("2026-10-08 15:00")
     "slot_pending": None,        # 정기 시각이 됐지만 아직 못 연 회차
+    # ── 바깥 값 받기 ──
+    "refreshing": False,         # 위치를 바꿔서 새 위치의 값을 받는 중
+    "loc_token": 0,              # 위치를 바꿀 때마다 1 증가 (늦게 도착한 예전 위치 값을 버리는 데 사용)
+    "data_token": None,          # 지금 가진 날씨·공기 값을 받았을 때의 loc_token
     "updated_at": now_str(),
 }
 
@@ -442,43 +447,83 @@ def save_settings():
 
 
 # ── 자동 사이클 (자동 모드일 때 주기적 실행) ───────────────────────────────
-def run_auto_cycle():
-    # ★ 사용자가 지도에서 설정한 위치 우선 사용
+LOCATION_RETRY_SECONDS = 30    # 위치를 바꾼 뒤 조회에 실패하면 이만큼 기다렸다가 한 번 더
+
+
+def refresh_outdoor():
+    """바깥 날씨·대기질을 새로 받아 상태에 반영 (자동·수동 모드 공통)
+    돌려주는 값: (weather, air). 받는 사이 위치가 또 바뀌었으면 버리고 None"""
     with state_lock:
-        lat = state.get("lat")
-        lon = state.get("lon")
+        token = state["loc_token"]
+        lat, lon, station = state.get("lat"), state.get("lon"), state.get("station")
+        same_place = state.get("data_token") == token      # 지금 가진 값이 같은 위치의 값인가
+        prev_weather, prev_air = state.get("weather"), state.get("air")
 
     if lat is None or lon is None:
         lat, lon = get_location()   # config 기본값
+    station = station or get_nearest_station(lat, lon)
 
-    station = state.get("station") or get_nearest_station(lat, lon)
-    weather = get_kma_weather(lat, lon)
-    air = get_air_quality(station)
+    # 기상청과 에어코리아를 동시에 조회 (공공 API 가 느릴 때가 있어서)
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        weather_job = pool.submit(get_kma_weather, lat, lon)
+        air_job = pool.submit(get_air_quality, station)
+        weather, air = weather_job.result(), air_job.result()
 
-    # ★ 실내 센서값도 판단에 반영
-    with state_lock:
-        indoor = state.get("indoor")
-        prev_weather = state.get("weather")
-        prev_air = state.get("air")
-
-    # ★ API 일시 실패 시 직전 값 유지 (한 번 실패로 '데이터 없음'이 되지 않게)
-    if weather is None and prev_weather:
-        print("[AUTO] 날씨 조회 실패 → 직전 값 사용")
-        weather = prev_weather
-    if air is None and prev_air and prev_air.get("station") == station:
-        print("[AUTO] 대기질 조회 실패 → 직전 값 사용")
-        air = prev_air
+    # ★ API 일시 실패 시 직전 값 유지 (한 번 실패로 '데이터 없음'이 되지 않게). 다른 위치의 값은 쓰지 않음
+    if same_place:
+        if weather is None and prev_weather:
+            print("[AUTO] 날씨 조회 실패 → 직전 값 사용")
+            weather = prev_weather
+        if air is None and prev_air and prev_air.get("station") == station:
+            print("[AUTO] 대기질 조회 실패 → 직전 값 사용")
+            air = prev_air
 
     with state_lock:
+        if state["loc_token"] != token:
+            return None
         state["weather"] = weather
         state["air"] = air
         state["station"] = station
-        state["lat"] = lat          # ★ 추가
-        state["lon"] = lon          # ★ 추가
+        state["lat"] = lat
+        state["lon"] = lon
+        state["data_token"] = token
+        state["refreshing"] = False
+    return weather, air
 
-    decision = apply_auto_decision(weather, air, indoor)
+
+# ── 자동 사이클 (10분마다) ─────────────────────────────────────────────────
+def run_auto_cycle():
+    """바깥 값을 새로 받고, 자동 모드면 그 값으로 판단 (수동 모드면 값만 갱신하고 창문은 그대로)"""
+    result = refresh_outdoor()
+    if result is None:
+        return None
+    weather, air = result
+
+    with state_lock:
+        mode, indoor, window = state["mode"], state.get("indoor"), state["window_status"]
+    if mode == "auto":
+        decision = apply_auto_decision(weather, air, indoor)
+    else:
+        decision = {"window_status": window, "rule": "manual", "reason": "수동 모드"}
     save_log(weather, air, decision)
     return decision
+
+
+def refresh_after_location(token):
+    """위치를 바꾼 뒤 뒤에서 실행: 새 위치의 값을 받고, 실패하면 잠시 뒤 한 번 더"""
+    for _ in range(2):
+        try:
+            run_auto_cycle()
+        except Exception as exc:
+            print(f"[Location] 새 위치 값 조회 실패: {exc}")
+        with state_lock:
+            if state["loc_token"] != token:
+                return                     # 그사이 위치가 또 바뀜 → 그쪽에서 처리
+            state["refreshing"] = False
+            if state.get("weather") and state.get("air"):
+                return
+        if stop_event.wait(LOCATION_RETRY_SECONDS):
+            return
 
 
 SKIP_WHY = {"rain": "비·눈이 와서", "wind": "바람이 강해서",
@@ -589,32 +634,21 @@ def apply_auto_decision(weather, air, indoor, quiet=False):
 
 # ── 백그라운드 워커 ────────────────────────────────────────────────────────
 def auto_worker():
+    """10분마다 바깥 값을 새로 받음 (자동 모드면 판단까지, 수동 모드면 값만 갱신)"""
     while not stop_event.is_set():
-        with state_lock:
-            mode = state["mode"]
+        try:
+            run_auto_cycle()
+        except Exception as exc:
+            print(f"[Worker] 사이클 실패: {exc}")
+        if stop_event.wait(AUTO_INTERVAL_SECONDS):
+            return
 
-        if mode == "auto":
-            try:
-                run_auto_cycle()
-            except Exception as exc:
-                print(f"[Worker] 사이클 실패: {exc}")
-
-            # 다음 사이클까지 대기 (모드 바뀌면 즉시 빠져나감)
-            for _ in range(AUTO_INTERVAL_SECONDS):
-                if stop_event.is_set():
-                    return
-                with state_lock:
-                    if state["mode"] != "auto":
-                        break
-                stop_event.wait(1)
-        else:
-            stop_event.wait(1)
 
 def recheck_auto():
     """자동 모드: 서버가 가진 지금 값으로 다시 판단 (외부 API 호출 없음, 1초마다)
     → 환기 끝·일찍 닫기·정기 시각·실내 공기 악화에 바로 반응. 바깥 정보는 auto_worker 가 10분마다 새로 받음"""
     with state_lock:
-        if state["mode"] != "auto":
+        if state["mode"] != "auto" or state.get("refreshing"):   # 새 위치 값을 받는 중이면 기다림
             return
         weather, air, indoor = state.get("weather"), state.get("air"), state.get("indoor")
     if weather and air:        # 첫 자동 판단(날씨·공기 수신) 이후부터
@@ -758,12 +792,9 @@ async def set_mode(req: ModeRequest):
         add_event("mode", "자동 모드로 전환" if req.mode == "auto" else "수동 모드로 전환", "manual")
         save_settings()
 
-    # 자동 모드로 바꾸면 즉시 1번 실행
+    # 자동 모드로 바꾸면 가진 값으로 바로 판단 (바깥 값은 모드와 상관없이 10분마다 받고 있음)
     if req.mode == "auto":
-        try:
-            run_auto_cycle()
-        except Exception as exc:
-            print(f"[Mode] 자동 모드 초기 실행 실패: {exc}")
+        recheck_auto()
 
     return {"ok": True, "mode": req.mode}
 
@@ -901,7 +932,9 @@ async def set_location(req: LocationRequest):
         state["lat"] = req.lat
         state["lon"] = req.lng
         state["station"] = new_station
-        state["weather"] = None     # ★ 이전 위치 날씨가 새 위치 값처럼 남지 않게
+        state["loc_token"] += 1     # ★ 이전 위치로 받고 있던 값이 늦게 와도 버려지게
+        token = state["loc_token"]
+        state["refreshing"] = True
         state["last_reason"] = f"위치 변경 → {new_station}"
         state["updated_at"] = now_str()
 
@@ -909,14 +942,8 @@ async def set_location(req: LocationRequest):
     add_event("location", f"위치 변경 → {new_station}", "manual")
     save_settings()
 
-    # 자동 모드면 즉시 새 데이터 가져오기
-    with state_lock:
-        mode = state["mode"]
-    if mode == "auto":
-        try:
-            run_auto_cycle()
-        except Exception as exc:
-            print(f"[Location] 자동 사이클 실패: {exc}")
+    # 새 위치의 날씨·공기는 뒤에서 받음 (응답은 바로 돌려줌, 자동·수동 모드 공통)
+    threading.Thread(target=refresh_after_location, args=(token,), daemon=True).start()
 
     return {
         "ok": True,

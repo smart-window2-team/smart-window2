@@ -919,18 +919,19 @@ async function refresh(){
     const w = s.weather || {};
     $('weatherIcon').innerHTML = icon(weatherIconName(w));
     $('tv_weather').innerHTML = valueHTML(w.temperature, 1, '°C');
-    $('ts_weather').textContent = has(w.temperature)
-      ? `${skyOrPrec(w)} · 바람 ${fmt(w.wind_speed)}m/s`
-      : '데이터 없음';
+    const loadingText = '새 위치 정보를 불러오는 중…';
+    $('ts_weather').textContent = s.refreshing ? loadingText
+      : has(w.temperature) ? `${skyOrPrec(w)} · 바람 ${fmt(w.wind_speed)}m/s`
+      : '불러오지 못했어요 · 곧 다시 시도해요';
 
     // 타일 - 바깥 공기
     const a = s.air || {};
     $('tv_air').innerHTML = valueHTML(a.pm25, 0, '㎍/㎥');
     setChip($('tc_air'), worstGrade([gradePM10(a.pm10), gradePM25(a.pm25)]));
-    if(!s.air){
-      $('ts_air').textContent = s.mode === 'manual'
-        ? '자동 모드에서 불러와요'
-        : '불러오지 못했어요 · 곧 다시 시도해요';
+    if(s.refreshing){
+      $('ts_air').textContent = loadingText;
+    } else if(!s.air){
+      $('ts_air').textContent = '불러오지 못했어요 · 곧 다시 시도해요';
     } else if(!has(a.pm25)){
       $('ts_air').textContent = '측정소 점검 중이에요';   // 에어코리아가 "-"를 준 경우
     } else {
