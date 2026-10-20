@@ -1,6 +1,7 @@
 """기상청 + 에어코리아 API 호출"""
 import math
 import time
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 import requests
 
@@ -125,55 +126,99 @@ def _latlon_to_grid(lat, lon):
     )
 
 
+KMA_URL = "http://apis.data.go.kr/1360000/VilageFcstInfoService_2.0"
+PTY_MAP = {0: "none", 1: "rain", 2: "rain_snow", 3: "snow",
+           5: "drizzle", 6: "sleet", 7: "flurry"}
+SKY_MAP = {1: "clear", 3: "cloudy", 4: "overcast"}
+WIND_LOOKAHEAD = timedelta(hours=1)   # 바람은 지금부터 이 시간 안의 예보까지 같이 봄 (세지기 전에 미리 닫기)
+
+
+def _kma_items(service, base_dt, base_time, nx, ny, rows):
+    params = {
+        "serviceKey": KMA_KEY,
+        "pageNo": 1,
+        "numOfRows": rows,
+        "dataType": "JSON",
+        "base_date": base_dt.strftime("%Y%m%d"),
+        "base_time": base_time,
+        "nx": nx,
+        "ny": ny,
+    }
+    return _get_json(f"{KMA_URL}/{service}", params)["response"]["body"]["items"]["item"]
+
+
+def _kma_observed(nx, ny, now):
+    """초단기실황 = 매시 정각에 실제로 잰 값 (40분쯤 뒤에 나옴)
+    돌려주는 값: {"T1H": "19.8", "WSD": "3.2", ...}, 관측 시각"""
+    base = now - timedelta(minutes=40)
+    items = _kma_items("getUltraSrtNcst", base, base.strftime("%H00"), nx, ny, rows=20)
+    return {item["category"]: item["obsrValue"] for item in items}, base.strftime("%H:00")
+
+
+def _kma_forecast(nx, ny, now):
+    """초단기예보 = 앞으로 6시간 예상값 (매시 45분에 새로 나옴)
+    돌려주는 값: [(예보 시각, {"T1H": "20", "WSD": "5", ...}), ...] 시간순"""
+    base = now if now.minute >= 45 else now - timedelta(hours=1)
+    items = _kma_items("getUltraSrtFcst", base, base.strftime("%H30"), nx, ny, rows=60)
+    slots = {}
+    for item in items:
+        # 날짜까지 같이 봐야 함 (시각만 보면 밤에는 자정 예보를 '가장 가까운 시각'으로 잘못 고름)
+        at = datetime.strptime(item["fcstDate"] + item["fcstTime"], "%Y%m%d%H%M").replace(tzinfo=KST)
+        slots.setdefault(at, {})[item["category"]] = item["fcstValue"]
+    return sorted(slots.items())
+
+
+def _code(value):
+    number = _safe_float(value)
+    return int(number) if number is not None else 0
+
+
 def get_kma_weather(lat, lon):
-    """기상청 초단기예보 (기존 실황값 + 하늘상태 SKY 포함)"""
-    try:
-        nx, ny = _latlon_to_grid(lat, lon)
-        now = datetime.now(KST)
-        # 초단기예보는 매시 45분에 발표됨 → 45분 이전이면 한 시간 전 발표분 사용
-        if now.minute >= 45:
-            base_dt = now
-        else:
-            base_dt = now - timedelta(hours=1)
-        base_date = base_dt.strftime("%Y%m%d")
-        base_time = base_dt.strftime("%H30")  # 예보 base_time은 'HH30'
+    """기상청 날씨. 실제 관측(초단기실황)과 예보(초단기예보)를 함께 써서 항목마다 나은 쪽을 고름
+    - 기온·습도: 관측 (관측이 없으면 예보)
+    - 비: 관측이나 가장 가까운 예보 중 하나라도 비면 비
+    - 풍속: 관측과 앞으로 1시간 안의 예보 중 가장 센 값 (관측은 최대 1시간 늦게 나와서 예보로 보완)
+    - 하늘: 예보 (관측에는 하늘 항목이 없음)
+    둘 중 하나가 실패해도 나머지로 동작, 둘 다 실패하면 None"""
+    nx, ny = _latlon_to_grid(lat, lon)
+    now = datetime.now(KST)
 
-        url = "http://apis.data.go.kr/1360000/VilageFcstInfoService_2.0/getUltraSrtFcst"
-        params = {
-            "serviceKey": KMA_KEY,
-            "pageNo": 1,
-            "numOfRows": 60,          # 항목 여러 개 × 여러 시각 → 넉넉히
-            "dataType": "JSON",
-            "base_date": base_date,
-            "base_time": base_time,
-            "nx": nx,
-            "ny": ny,
-        }
-        items = _get_json(url, params)["response"]["body"]["items"]["item"]
+    # 실황과 예보를 동시에 조회
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        obs_job = pool.submit(_kma_observed, nx, ny, now)
+        fcst_job = pool.submit(_kma_forecast, nx, ny, now)
+        try:
+            obs, observed_at = obs_job.result()
+        except Exception as exc:
+            print(f"[KMA] 실황 조회 실패 → 예보만 사용: {exc}")
+            obs, observed_at = {}, None
+        try:
+            slots = fcst_job.result()
+        except Exception as exc:
+            print(f"[KMA] 예보 조회 실패 → 실황만 사용: {exc}")
+            slots = []
 
-        # 예보는 여러 시각이 내려옴 → 가장 가까운(가장 빠른) fcstTime 한 개만 사용
-        nearest = min(item["fcstTime"] for item in items)
-        values = {
-            item["category"]: item["fcstValue"]
-            for item in items if item["fcstTime"] == nearest
-        }
-
-        pty_code = int(values.get("PTY", 0))
-        pty_map = {
-            0: "none", 1: "rain", 2: "rain_snow", 3: "snow",
-            5: "drizzle", 6: "sleet", 7: "flurry",
-        }
-        sky_code = int(values.get("SKY", 0))
-        sky_map = {1: "clear", 3: "cloudy", 4: "overcast"}
-        return {
-            "temperature": _safe_float(values.get("T1H")),
-            "humidity": _safe_float(values.get("REH")),
-            "wind_speed": _safe_float(values.get("WSD")),
-            "precipitation_code": pty_code,
-            "precipitation": pty_map.get(pty_code, "unknown"),
-            "sky_code": sky_code,                      # ← 추가
-            "sky": sky_map.get(sky_code, "unknown"),   # ← 추가
-        }
-    except Exception as exc:
-        print(f"[KMA] 조회 실패: {exc}")
+    if not obs and not slots:
+        print("[KMA] 조회 실패: 실황·예보 모두 없음")
         return None
+
+    nearest = slots[0][1] if slots else {}                          # 가장 가까운 예보
+    soon = [v for at, v in slots if at <= now + WIND_LOOKAHEAD] or ([nearest] if nearest else [])
+
+    pick = lambda key: _safe_float(obs.get(key)) if _safe_float(obs.get(key)) is not None else _safe_float(nearest.get(key))
+    winds = [w for w in [_safe_float(obs.get("WSD"))] + [_safe_float(v.get("WSD")) for v in soon] if w is not None]
+    pty_code = _code(obs.get("PTY")) or _code(nearest.get("PTY"))
+    sky_code = _code(nearest.get("SKY"))
+
+    return {
+        "temperature": pick("T1H"),
+        "humidity": pick("REH"),
+        "wind_speed": max(winds) if winds else None,
+        "precipitation_code": pty_code,
+        "precipitation": PTY_MAP.get(pty_code, "unknown"),
+        "sky_code": sky_code,
+        "sky": SKY_MAP.get(sky_code, "unknown"),
+        # 참고용 (판단 근거·기록에서 어디서 온 값인지 볼 수 있게)
+        "wind_observed": _safe_float(obs.get("WSD")),
+        "observed_at": observed_at,
+    }
