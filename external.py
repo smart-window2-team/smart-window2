@@ -174,11 +174,13 @@ def _code(value):
 
 
 def get_kma_weather(lat, lon):
-    """기상청 날씨. 실제 관측(초단기실황)과 예보(초단기예보)를 함께 써서 항목마다 나은 쪽을 고름
-    - 기온·습도: 관측 (관측이 없으면 예보)
-    - 비: 관측이나 가장 가까운 예보 중 하나라도 비면 비
-    - 풍속: 관측과 앞으로 1시간 안의 예보 중 가장 센 값 (관측은 최대 1시간 늦게 나와서 예보로 보완)
+    """기상청 날씨. 실제 관측(초단기실황)과 예보(초단기예보)를 함께 씀
+    화면에 보이는 값 (지금 시간대에 맞춰진 값이라 날씨 앱과 비슷하게 보임)
+    - 기온·습도·풍속·풍향: 가장 가까운 예보 (예보가 없으면 관측)
     - 하늘: 예보 (관측에는 하늘 항목이 없음)
+    창문 판단에 쓰는 값 (안전한 쪽으로)
+    - wind_judge: 관측과 앞으로 1시간 안의 예보 중 가장 센 풍속 (세지기 전에 미리 닫기)
+    - 비: 관측이나 가장 가까운 예보 중 하나라도 비면 비 (화면에도 같은 값)
     둘 중 하나가 실패해도 나머지로 동작, 둘 다 실패하면 None"""
     nx, ny = _latlon_to_grid(lat, lon)
     now = datetime.now(KST)
@@ -205,7 +207,9 @@ def get_kma_weather(lat, lon):
     nearest = slots[0][1] if slots else {}                          # 가장 가까운 예보
     soon = [v for at, v in slots if at <= now + WIND_LOOKAHEAD] or ([nearest] if nearest else [])
 
-    pick = lambda key: _safe_float(obs.get(key)) if _safe_float(obs.get(key)) is not None else _safe_float(nearest.get(key))
+    def pick(key):        # 가장 가까운 예보, 없으면 관측
+        value = _safe_float(nearest.get(key))
+        return value if value is not None else _safe_float(obs.get(key))
     winds = [w for w in [_safe_float(obs.get("WSD"))] + [_safe_float(v.get("WSD")) for v in soon] if w is not None]
     pty_code = _code(obs.get("PTY")) or _code(nearest.get("PTY"))
     sky_code = _code(nearest.get("SKY"))
@@ -213,7 +217,9 @@ def get_kma_weather(lat, lon):
     return {
         "temperature": pick("T1H"),
         "humidity": pick("REH"),
-        "wind_speed": max(winds) if winds else None,
+        "wind_speed": pick("WSD"),                      # 화면용
+        "wind_dir": pick("VEC"),                        # 풍향 (도, 바람이 불어오는 쪽)
+        "wind_judge": max(winds) if winds else None,    # 판단용
         "precipitation_code": pty_code,
         "precipitation": PTY_MAP.get(pty_code, "unknown"),
         "sky_code": sky_code,
@@ -221,4 +227,67 @@ def get_kma_weather(lat, lon):
         # 참고용 (판단 근거·기록에서 어디서 온 값인지 볼 수 있게)
         "wind_observed": _safe_float(obs.get("WSD")),
         "observed_at": observed_at,
+        "forecast_at": slots[0][0].strftime("%H:%M") if slots else None,   # 화면 값의 예보 시각
+    }
+
+
+# ── 단기예보: 비 올 가능성 (강수확률) ─────────────────────────────────────
+# 하루 8번(02·05·08·11·14·17·20·23시) 발표, 발표 10분쯤 뒤부터 받을 수 있음 → 발표가 바뀔 때만 새로 조회
+VILAGE_BASE_HOURS = (2, 5, 8, 11, 14, 17, 20, 23)
+RAIN_HOURS = 48                    # 앞으로 이 시간 안의 비 소식을 봄
+_rain_cache = {}                   # (nx, ny, 발표 시각) → 결과
+
+
+def _vilage_base(now):
+    """지금 받을 수 있는 가장 최근 단기예보 발표 시각"""
+    ready = now - timedelta(minutes=15)
+    for back in range(0, 25):
+        t = ready - timedelta(hours=back)
+        if t.hour in VILAGE_BASE_HOURS:
+            return t.replace(minute=0, second=0, microsecond=0)
+    return ready.replace(minute=0, second=0, microsecond=0)
+
+
+def get_rain_outlook(lat, lon):
+    """앞으로 48시간의 비 소식. 실패하면 None
+    돌려주는 값:
+      next_rain: 처음 비(눈)가 예보된 시각과 그때 강수확률 {"at": "2026-11-03 15:00", "pop": 70, "type": "rain"} 또는 None
+      max_pop:   앞으로 24시간 중 가장 높은 강수확률과 그 시각
+      base_at:   발표 시각 (예: 14:00)"""
+    nx, ny = _latlon_to_grid(lat, lon)
+    now = datetime.now(KST)
+    base = _vilage_base(now)
+    key = (nx, ny, base)
+    if key not in _rain_cache:
+        try:
+            items = _kma_items("getVilageFcst", base, base.strftime("%H00"), nx, ny, rows=1000)
+        except Exception as exc:
+            print(f"[KMA] 단기예보 조회 실패: {exc}")
+            return None
+        slots = {}
+        for item in items:
+            if item["category"] in ("POP", "PTY"):
+                at = datetime.strptime(item["fcstDate"] + item["fcstTime"], "%Y%m%d%H%M").replace(tzinfo=KST)
+                slots.setdefault(at, {})[item["category"]] = item["fcstValue"]
+        _rain_cache.clear()                               # 지난 발표·다른 위치 것은 버림
+        _rain_cache[key] = sorted(slots.items())
+
+    upcoming = [(at, v) for at, v in _rain_cache[key] if now - timedelta(hours=1) < at <= now + timedelta(hours=RAIN_HOURS)]
+    if not upcoming:
+        return None
+    fmt = lambda at: at.strftime("%Y-%m-%d %H:%M")
+    pop = lambda v: int(_safe_float(v.get("POP")) or 0)
+
+    next_rain = None
+    for at, v in upcoming:
+        code = _code(v.get("PTY"))
+        if code:
+            next_rain = {"at": fmt(at), "pop": pop(v), "type": PTY_MAP.get(code, "rain")}
+            break
+    day = [(at, v) for at, v in upcoming if at <= now + timedelta(hours=24)] or upcoming
+    top_at, top = max(day, key=lambda item: pop(item[1]))
+    return {
+        "next_rain": next_rain,
+        "max_pop": {"at": fmt(top_at), "pop": pop(top)},
+        "base_at": base.strftime("%H:%M"),
     }

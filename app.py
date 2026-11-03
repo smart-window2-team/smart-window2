@@ -27,7 +27,7 @@ from config import (
     VENT_CYCLE_OPEN_SECONDS,
     VENT_CYCLE_CLOSE_SECONDS,
 )
-from external import get_air_quality, get_kma_weather, get_location, get_nearest_station
+from external import get_air_quality, get_kma_weather, get_location, get_nearest_station, get_rain_outlook
 import db   # ★ 기록·설정 저장 (MySQL)
 
 app = FastAPI(title="스마트 창문 서버", version="2.0.0")
@@ -99,6 +99,7 @@ state = {
     "slot_pending": None,        # 정기 시각이 됐지만 아직 못 연 회차
     # ── 바깥 값 받기 ──
     "refreshing": False,         # 위치를 바꿔서 새 위치의 값을 받는 중
+    "rain_outlook": None,        # 앞으로 48시간 비 소식 (단기예보, 화면 표시용)
     "loc_token": 0,              # 위치를 바꿀 때마다 1 증가 (늦게 도착한 예전 위치 값을 버리는 데 사용)
     "data_token": None,          # 지금 가진 날씨·공기 값을 받았을 때의 loc_token
     "updated_at": now_str(),
@@ -129,6 +130,13 @@ VENT_SECONDS = 30 * 60            # 한 번 환기하는 시간 (바깥 좋음·
 SHORT_VENT_SECONDS = 10 * 60      # 바깥이 나쁠 때 짧게 여는 시간
 EARLY_CLOSE_SECONDS = 10 * 60     # 이만큼은 열어 둔 뒤에야 '일찍 닫기' 가능
 VENT_REST_SECONDS = 30 * 60       # 환기 뒤 다시 열지 않고 쉬는 시간
+
+
+def judge_wind(weather):
+    """창문 판단에 쓰는 풍속: 관측과 1시간 안 예보 중 최대 (없으면 화면용 풍속)"""
+    weather = weather or {}
+    value = weather.get("wind_judge")
+    return value if value is not None else weather.get("wind_speed")
 
 
 def outdoor_level(air):
@@ -241,7 +249,7 @@ def decide_window(weather, air, indoor=None, ctx=None):
     if not weather or not air:
         return closed("no_data", "데이터 수신 실패 → 안전모드")
 
-    wind = weather.get("wind_speed") or 0
+    wind = judge_wind(weather) or 0
     pty = weather.get("precipitation_code", 0)
     pm10, pm25 = air.get("pm10"), air.get("pm25")
     indoor = indoor or {}
@@ -332,15 +340,19 @@ def explain_window(weather, air, indoor, decision, ctx=None):
         add("rain", "ok", "비·눈이 안 와요", "")
 
     # 2) 바람
-    wind = weather.get("wind_speed")
+    wind, now_wind = judge_wind(weather), weather.get("wind_speed")
     if wind is None:
         add("wind", "none", "풍속 정보가 없어요", "")
-    elif wind >= WIND_CLOSE:
-        add("wind", "close", "바람이 강해요", f"{wind:.1f}m/s", rule == "wind")
-    elif ctx.get("wind_hold") and wind >= WIND_REOPEN:
-        add("wind", "close", "바람이 아직 강해요", f"{wind:.1f}m/s · {WIND_REOPEN:.0f}m/s 아래가 되면 다시 확인", rule == "wind")
     else:
-        add("wind", "ok", "바람이 괜찮아요", f"{wind:.1f}m/s")
+        # 화면 풍속보다 판단 풍속이 세면 '1시간 안에 세짐' 예보 때문 → 둘 다 보여 줌
+        ahead = now_wind is not None and wind > now_wind
+        detail = f"지금 {now_wind:.1f}m/s · 1시간 안에 {wind:.1f}m/s" if ahead else f"{wind:.1f}m/s"
+        if wind >= WIND_CLOSE:
+            add("wind", "close", "바람이 곧 강해져요" if ahead else "바람이 강해요", detail, rule == "wind")
+        elif ctx.get("wind_hold") and wind >= WIND_REOPEN:
+            add("wind", "close", "바람이 아직 강해요", f"{detail} · {WIND_REOPEN:.0f}m/s 아래가 되면 다시 확인", rule == "wind")
+        else:
+            add("wind", "ok", "바람이 괜찮아요", detail)
 
     # 3) 바깥 대기질
     pm10, pm25 = air.get("pm10"), air.get("pm25")
@@ -458,16 +470,18 @@ def refresh_outdoor():
         lat, lon, station = state.get("lat"), state.get("lon"), state.get("station")
         same_place = state.get("data_token") == token      # 지금 가진 값이 같은 위치의 값인가
         prev_weather, prev_air = state.get("weather"), state.get("air")
+        prev_rain = state.get("rain_outlook")
 
     if lat is None or lon is None:
         lat, lon = get_location()   # config 기본값
     station = station or get_nearest_station(lat, lon)
 
     # 기상청과 에어코리아를 동시에 조회 (공공 API 가 느릴 때가 있어서)
-    with ThreadPoolExecutor(max_workers=2) as pool:
+    with ThreadPoolExecutor(max_workers=3) as pool:
         weather_job = pool.submit(get_kma_weather, lat, lon)
         air_job = pool.submit(get_air_quality, station)
-        weather, air = weather_job.result(), air_job.result()
+        rain_job = pool.submit(get_rain_outlook, lat, lon)      # 비 소식 (발표가 바뀔 때만 실제로 조회)
+        weather, air, rain = weather_job.result(), air_job.result(), rain_job.result()
 
     # ★ API 일시 실패 시 직전 값 유지 (한 번 실패로 '데이터 없음'이 되지 않게). 다른 위치의 값은 쓰지 않음
     if same_place:
@@ -477,16 +491,20 @@ def refresh_outdoor():
         if air is None and prev_air and prev_air.get("station") == station:
             print("[AUTO] 대기질 조회 실패 → 직전 값 사용")
             air = prev_air
+        if rain is None:
+            rain = prev_rain
 
     with state_lock:
         if state["loc_token"] != token:
             return None
         state["weather"] = weather
         state["air"] = air
+        state["rain_outlook"] = rain
         state["station"] = station
         state["lat"] = lat
         state["lon"] = lon
         state["data_token"] = token
+        state["outdoor_updated_at"] = now_str()    # 바깥 값을 마지막으로 받은 시각 (화면 '업데이트')
         state["refreshing"] = False
     return weather, air
 
@@ -583,7 +601,7 @@ def apply_auto_decision(weather, air, indoor, quiet=False):
     now_dt = datetime.now(KST)
     with state_lock:
         # 강풍으로 닫았으면 바람이 충분히 잦아들 때까지 유지
-        wind = (weather or {}).get("wind_speed") or 0
+        wind = judge_wind(weather) or 0
         state["wind_hold"] = wind >= WIND_CLOSE or (bool(state.get("wind_hold")) and wind >= WIND_REOPEN)
 
         slot_due, notes = update_schedule(now_dt)

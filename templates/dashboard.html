@@ -186,6 +186,14 @@
           <svg class="ic tile-go" aria-hidden="true"><use href="#i-chevron"/></svg>
         </button>
       </div>
+      <div class="card rain-card" id="rainCard" hidden>
+        <div class="rain-head"><svg class="ic"><use href="#i-rain"/></svg><span id="rainHead">비 소식</span></div>
+        <div class="rain-body">
+          <p class="rain-text" id="rainText">-</p>
+          <span class="rain-pop" id="rainPop"></span>
+        </div>
+      </div>
+      <p class="data-source" id="dataSource"></p>
     </section>
 
     <!-- 3. 추이 -->
@@ -432,6 +440,24 @@ function gradeWind(v){
   if(!has(v)) return 'unknown';
   if(v<3) return 'good'; if(v<5) return 'normal'; return 'bad';
 }
+// 바람 문구: 4m/s 미만은 보퍼트 풍력계급, 그 이상은 기상청 예보 용어
+function windText(v){
+  if(!has(v)) return '';
+  if(v < 0.3) return '바람이 거의 없어요';
+  if(v < 1.6) return '아주 약한 바람이 불어요';
+  if(v < 4)   return '가벼운 바람이 불어요';
+  if(v < 9)   return '바람이 약간 강해요';
+  if(v < 14)  return '바람이 강해요';
+  return '바람이 매우 강해요';
+}
+const windShort = v => !has(v) ? '' : v < 0.3 ? '바람 없음' : v < 4 ? '약한 바람' : v < 9 ? '약간 강한 바람' : v < 14 ? '강한 바람' : '매우 강한 바람';
+// 풍향(도) → "북서쪽에서" (기상청 VEC = 바람이 불어오는 방향)
+const DIRS = ['북', '북북동', '북동', '동북동', '동', '동남동', '남동', '남남동', '남', '남남서', '남서', '서남서', '서', '서북서', '북서', '북북서'];
+const windFrom = deg => has(deg) ? `${DIRS[Math.round(deg / 22.5) % 16]}쪽에서 ` : '';
+const windSentence = w => {
+  const text = windText(w.wind_speed);
+  return text && w.wind_speed >= 0.3 ? windFrom(w.wind_dir) + text : text;
+};
 const GRADES = ['good', 'normal', 'bad', 'vbad'];
 const gradeLabel = { good:'좋음', normal:'보통', bad:'나쁨', vbad:'매우나쁨', unknown:'-' };
 
@@ -598,6 +624,53 @@ let lastState = {};
 const row = (label, value, grade='unknown') =>
   `<div class="row"><span class="row-label">${label}</span><span class="row-value">${value}${chip(grade)}</span></div>`;
 
+// 비 소식 카드 (기상청 단기예보, 앞으로 48시간)
+// "2026-11-03 15:00" → "내일 오후 3시"
+function whenText(ts, today){
+  const [date, time] = ts.split(' ');
+  const days = Math.round((new Date(date) - new Date(today)) / 86400000);
+  const dayWord = ['오늘', '내일', '모레'][days] || `${Number(date.split('-')[2])}일`;
+  const h = Number(time.split(':')[0]);
+  const part = h < 6 ? '새벽' : h < 12 ? '오전' : h < 18 ? '오후' : '밤';
+  return `${dayWord} ${part} ${h % 12 || 12}시`;
+}
+const RAIN_WORD = { rain:'비', drizzle:'비', rain_snow:'비나 눈', sleet:'비나 눈', snow:'눈', flurry:'눈' };
+
+function renderRain(s){
+  const r = s.rain_outlook;
+  $('rainCard').hidden = !r;
+  if(!r) return;
+  const today = (s.server_time || '').split(' ')[0];
+  const word = r.next_rain ? (RAIN_WORD[r.next_rain.type] || '비') : '비';
+  if(r.next_rain){
+    $('rainHead').textContent = `${word}가 내릴 예정이에요`.replace('눈가', '눈이');
+    $('rainText').textContent = `${whenText(r.next_rain.at, today)}쯤 ${word}가 올 가능성이 있어요`.replace('눈가', '눈이');
+    $('rainPop').textContent = `${r.next_rain.pop}%`;
+  } else {
+    $('rainHead').textContent = '비 소식';
+    $('rainText').textContent = r.max_pop.pop >= 30
+      ? `이틀 동안 비 예보는 없지만, ${whenText(r.max_pop.at, today)}에 강수확률이 조금 올라가요`
+      : '이틀 동안 비 소식이 없어요';
+    $('rainPop').textContent = `${r.max_pop.pop}%`;
+  }
+}
+
+// 출처와 업데이트 시각 (공기 탭 맨 아래)
+function renderSource(s){
+  const w = s.weather || {}, a = s.air || {};
+  const station = a.station || s.station;
+  const times = [
+    w.forecast_at && `날씨 ${w.forecast_at} 예보`,
+    s.rain_outlook && `비 소식 ${s.rain_outlook.base_at} 발표`,
+    w.observed_at && `${w.observed_at} 관측`,
+    a.measured_at && `대기질 ${timeOf(a.measured_at)} 측정`,
+  ].filter(Boolean).join(' · ');
+  $('dataSource').innerHTML =
+    `출처: 기상청 · 에어코리아${station ? ` (${escapeHTML(station)} 측정소)` : ''}` +
+    (times ? `<br>${times}` : '') +
+    (s.outdoor_updated_at ? `<br>업데이트 ${timeOf(s.outdoor_updated_at)}` : '');
+}
+
 function openDetail(type){
   const body = $('detailBody');
   const title = $('detailTitle');
@@ -608,6 +681,7 @@ function openDetail(type){
     body.innerHTML =
       row('기온', `${fmt(w.temperature)}°C`) +
       row('습도', `${fmt(w.humidity, 0)}%`) +
+      row('바람', windSentence(w) || '-') +
       row('풍속', `${fmt(w.wind_speed)}m/s`, gradeWind(w.wind_speed)) +
       row('하늘', mapSky(w.sky)) +
       row('강수', mapPrec(w.precipitation));
@@ -921,8 +995,11 @@ async function refresh(){
     $('tv_weather').innerHTML = valueHTML(w.temperature, 1, '°C');
     const loadingText = '새 위치 정보를 불러오는 중…';
     $('ts_weather').textContent = s.refreshing ? loadingText
-      : has(w.temperature) ? `${skyOrPrec(w)} · 바람 ${fmt(w.wind_speed)}m/s`
+      : has(w.temperature) ? `${skyOrPrec(w)} · ${windShort(w.wind_speed)} ${fmt(w.wind_speed)}m/s`
       : '불러오지 못했어요 · 곧 다시 시도해요';
+
+    renderSource(s);
+    renderRain(s);
 
     // 타일 - 바깥 공기
     const a = s.air || {};
