@@ -46,9 +46,9 @@
     <td align="center" width="33%"><img src="docs/images/chart.png" alt="추이" /><br /><b>추이</b><br /><sub>파란 띠 = 창문을 연 시간, 환기 효과가 바로 보임</sub></td>
   </tr>
   <tr>
-    <td align="center"><img src="docs/images/schedule.png" alt="정기 환기 시간" /><br /><b>처음 설정 · 정기 환기</b><br /><sub>추천안 2종 또는 직접 입력</sub></td>
+    <td align="center"><img src="docs/images/summary.png" alt="요약" /><br /><b>요약</b><br /><sub>하루 결산: 환기 기록 · 효과 · 건너뛴 회차</sub></td>
     <td align="center"><img src="docs/images/settings.png" alt="설정" /><br /><b>설정</b><br /><sub>위치 · 기기 연결 · 정기 환기 · 테마</sub></td>
-    <td align="center"><img src="docs/images/welcome.png" alt="시작" /><br /><b>시작</b><br /><sub>처음 접속 시 한 번만 표시</sub></td>
+    <td align="center"><img src="docs/images/schedule.png" alt="정기 환기 시간" /><br /><b>처음 설정 · 정기 환기</b><br /><sub>추천안 2종 또는 직접 입력</sub></td>
   </tr>
 </table>
 
@@ -58,7 +58,7 @@
 | 홈 | 창문 열림/닫힘, 쉬운 말로 된 판단 이유, 다음 정기 환기 시각. 판단 근거는 눌렀을 때만 표시 |
 | 공기 | 한 줄 결론 → 바깥 날씨(기온·습도·바람) → 실내 센서(CO₂·온도·습도) → 바깥·실내 초미세먼지 비교 → 비 소식 |
 | 추이 | 오늘(0시~현재) / 어제. 이산화탄소·초미세먼지·미세먼지, 미세먼지는 바깥 값을 점선으로 함께 표시, 창문이 열려 있던 시간을 띠로 표시 |
-| 요약 | 최근 1시간 최고값·추세·등급 비율, 마지막 환기 전후 효과 |
+| 요약 | 오늘 / 어제 하루 결산. 한 줄 결론, 회차별 환기 기록(이유·시간·효과), 비·강풍으로 건너뛴 회차와 남은 정기 환기, 실내 공기 등급 비율, 가장 높았던 값 |
 | 설정 | 위치, 기기 연결, 정기 환기 시간, 활동 기록, 화면 테마, 처음 화면 다시 보기 |
 
 ---
@@ -189,6 +189,9 @@ JSON 파일 기록은 개수 제한과 동시 접근 문제가 있었다. MySQL(
 **9. 로그인 없이 설정을 기기 간에 유지**
 로그인 기능이 없어 브라우저에 설정을 저장하면 폰과 PC의 설정이 달라졌다. 창문 하나에 설정 하나라는 전제로 위치·기기·정기 환기 시간·처음 설정 완료 여부를 서버 DB에 저장해, 어떤 기기로 접속해도 같은 설정을 쓰도록 했다.
 
+
+**10. 탭마다 역할이 겹치고 기간 기준이 제각각인 문제**
+추이 차트는 1·6·24시간, 요약은 최근 1시간이라 기준이 서로 달랐고, 1시간 차트와 1시간 요약은 같은 내용을 반복했다. 탭의 역할을 **공기 = 지금 상태, 추이 = 시간에 따른 변화, 요약 = 하루 결산**으로 나누고, 의미가 분명하지 않은 기간 대신 사람이 생각하는 단위인 **오늘 / 어제**로 통일했다. 추이 차트에는 창문이 열려 있던 시간을 띠로 표시하고, 요약에는 회차별 환기 이유와 전후 효과를 보여 주어 "창문이 무엇을 했고 효과가 있었는지"가 드러나도록 했다.
 ---
 
 ## 실행 방법
@@ -260,6 +263,7 @@ python app.py
 | `GET` | `/api/indoor-history` | 실내 기록 (`?day=today/yesterday` 또는 `?hours=1`) |
 | `GET` | `/api/air-history` | 바깥 기록 (`?day=today/yesterday` 또는 `?hours=1`) |
 | `GET` | `/api/window-spans` | 그날 창문이 열려 있던 구간 (`?day=today/yesterday`) |
+| `GET` | `/api/day-summary` | 그날 환기 기록(이유·시간·전후 효과), 건너뛴·남은 정기 환기 (`?day=today/yesterday`) |
 | `GET` | `/api/vent-effect` | 마지막 환기 전후 실내 공기 비교 |
 | `GET` | `/api/events` | 활동 기록 (`?limit=30`) |
 
