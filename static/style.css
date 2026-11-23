@@ -464,6 +464,23 @@ button:focus-visible {
 .hero[data-status="open"] .why-btn,
 .hero[data-status="half"] .why-btn { background: var(--card); }
 
+/* 정기 환기 시각 (창문 카드 아래쪽, 눌러서 변경) */
+.schedule-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 10px;
+  padding: 6px 10px;
+  border: 0;
+  border-radius: 999px;
+  background: none;
+  color: var(--muted);
+  font-size: 0.85rem;
+  font-variant-numeric: tabular-nums;
+}
+.schedule-link:hover { background: var(--fill); }
+.schedule-edit { color: var(--blue); font-weight: 600; }
+
 /* 모바일: 옆 페이지 안내 */
 .swipe-hint {
   display: flex;
@@ -1333,6 +1350,53 @@ body.manual .dock { transform: none; }
   font-size: 0.75rem;
   color: var(--muted);
 }
+
+/* 정기 환기 시각 선택 */
+.schedule-options { display: grid; gap: 8px; }
+.schedule-opt {
+  display: grid;
+  gap: 2px;
+  padding: 14px 16px;
+  border: 2px solid transparent;
+  border-radius: 16px;
+  background: var(--fill);
+  color: var(--ink);
+  text-align: left;
+  transition: background .15s ease, border-color .15s ease;
+}
+.schedule-opt:hover { background: var(--blue-soft); }
+.schedule-opt.selected { border-color: var(--blue); background: var(--blue-soft); }
+.opt-label { font-size: 0.95rem; font-weight: 700; }
+.opt-tag {
+  margin-left: 4px;
+  padding: 2px 6px;
+  border-radius: 6px;
+  background: var(--blue);
+  color: #fff;
+  font-size: 0.7rem;
+  font-weight: 600;
+  vertical-align: middle;
+}
+.opt-times { font-size: 1.05rem; font-weight: 700; font-variant-numeric: tabular-nums; }
+.opt-desc { color: var(--muted); font-size: 0.8rem; }
+.schedule-custom {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+  margin-top: 10px;
+}
+.schedule-custom input {
+  min-width: 0;
+  padding: 12px 8px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--card);
+  color: var(--ink);
+  font: inherit;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+}
+.schedule-error { min-height: 1.2em; margin: 10px 0; color: var(--vbad); font-size: 0.85rem; }
 
 /* 지도 */
 #naverMap {

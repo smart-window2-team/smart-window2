@@ -97,6 +97,7 @@ state = {
     "wind_hold": False,          # 강풍으로 닫아 둔 상태 (바람이 충분히 잦아들 때까지 유지)
     "slot_done": None,           # 처리한 정기 환기 회차 ("2026-10-08 15:00")
     "slot_pending": None,        # 정기 시각이 됐지만 아직 못 연 회차
+    "vent_schedule": None,       # 사용자가 정한 정기 환기 시각 ["HH:MM" ×3]. None 이면 아직 안 정함 → 기본 시각 사용
     # ── 바깥 값 받기 ──
     "refreshing": False,         # 위치를 바꿔서 새 위치의 값을 받는 중
     "rain_outlook": None,        # 앞으로 48시간 비 소식 (단기예보, 화면 표시용)
@@ -123,13 +124,14 @@ INDOOR_PM_GAP = 5                 # 실내 미세먼지가 바깥보다 이만�
 INDOOR_PM_MIN = {"pm25": 15, "pm10": 30}   # 이 값 이상일 때만 '실내가 더 탁함' (둘 다 깨끗한데 여는 것 방지)
 INDOOR_STALE_SECONDS = 300        # 센서값이 이보다 오래됐으면 판단에 쓰지 않음 (라즈베리파이 꺼짐)
 
-VENT_SCHEDULE = ("10:00", "15:00", "20:00")   # 정기 환기 시각 (하루 3번)
+VENT_SCHEDULE = ("10:00", "15:00", "20:00")   # 정기 환기 기본 시각 (하루 3번) — 사용자가 정하지 않았을 때
+SCHEDULE_MIN_GAP_SECONDS = 2 * 60 * 60        # 사용자가 정하는 정기 환기 시각끼리의 최소 간격
 SCHEDULE_WINDOW_SECONDS = 30 * 60 # 정기 시각에 비·강풍 등으로 못 열면 이 시간 동안 다시 시도, 지나면 그 회차는 건너뜀
 SCHEDULE_SKIP_SECONDS = 60 * 60   # 정기 시각 전 이 시간 안에 환기했으면 그 회차는 생략
 VENT_SECONDS = 30 * 60            # 한 번 환기하는 시간 (바깥 좋음·보통)
 SHORT_VENT_SECONDS = 10 * 60      # 바깥이 나쁠 때 짧게 여는 시간
 EARLY_CLOSE_SECONDS = 10 * 60     # 이만큼은 열어 둔 뒤에야 '일찍 닫기' 가능
-VENT_REST_SECONDS = 30 * 60       # 환기 뒤 다시 열지 않고 쉬는 시간
+VENT_REST_SECONDS = 30 * 60       # 환기 뒤 다시 열지 않고 쉬는 시간            
 
 
 def judge_wind(weather):
@@ -187,8 +189,34 @@ def dur_text(seconds):
 
 
 # ── 정기 환기 시각 ─────────────────────────────────────────────────────────
+def vent_schedule():
+    """지금 쓰는 정기 환기 시각 (사용자가 정한 값, 없으면 기본값)"""
+    return tuple(state.get("vent_schedule") or VENT_SCHEDULE)
+
+
+def check_schedule(times):
+    """정기 환기 시각 검사 → 정렬한 ["HH:MM" ×3]. 잘못되면 ValueError(이유)"""
+    if len(times) != 3:
+        raise ValueError("정기 환기 시각은 3개를 정해야 해요")
+    minutes = []
+    for t in times:
+        try:
+            hour, minute = map(int, t.split(":"))
+        except (ValueError, AttributeError):
+            raise ValueError(f"시각 형식이 올바르지 않아요: {t}")
+        if not (0 <= hour < 24 and 0 <= minute < 60):
+            raise ValueError(f"시각 형식이 올바르지 않아요: {t}")
+        minutes.append(hour * 60 + minute)
+    minutes.sort()
+    gap = SCHEDULE_MIN_GAP_SECONDS // 60
+    gaps = [minutes[1] - minutes[0], minutes[2] - minutes[1], minutes[0] + 24 * 60 - minutes[2]]   # 마지막 → 다음 날 첫 회차까지 포함
+    if min(gaps) < gap:
+        raise ValueError(f"정기 환기 시각끼리는 {gap // 60}시간 이상 떨어져야 해요")
+    return [f"{m // 60:02d}:{m % 60:02d}" for m in minutes]
+
+
 def _slot_times(day):
-    for hhmm in VENT_SCHEDULE:
+    for hhmm in vent_schedule():
         hour, minute = map(int, hhmm.split(":"))
         yield day.replace(hour=hour, minute=minute, second=0, microsecond=0)
 
@@ -454,7 +482,7 @@ def add_event(kind, reason, source, window_status=None):
 def save_settings():
     """재시작해도 유지할 설정(모드·위치·측정소) 저장"""
     with state_lock:
-        values = {k: state.get(k) for k in ("mode", "lat", "lon", "station")}
+        values = {k: state.get(k) for k in ("mode", "lat", "lon", "station", "vent_schedule")}
     _db_safe("설정 저장", db.set_settings, **values)
 
 
@@ -735,6 +763,11 @@ class TimerRequest(BaseModel):
     """타이머 시작/연장 요청"""
     duration_seconds: int  # 0이면 무제한, >0이면 N초 후 자동 닫힘
 
+class ScheduleRequest(BaseModel):
+    """정기 환기 시각 저장 요청"""
+    times: list[str]                                   # ["10:00", "15:00", "20:00"]
+    preset: Literal["home", "out", "custom", "later"] = "custom"
+
 class LocationRequest(BaseModel):
     lat: float
     lng: float
@@ -779,6 +812,8 @@ async def get_status():
     snap["vent_rest_remaining"] = rest if rest else None
     snap["next_vent_at"] = None if VENT_CYCLE_TEST else ctx["next_label"]      # 다음 정기 환기 시각 "HH:MM"
     snap["vent_cycle_test"] = VENT_CYCLE_TEST
+    snap["vent_schedule_set"] = bool(snap.get("vent_schedule"))                 # False 면 대시보드가 처음 한 번 시각을 물어봄
+    snap["vent_schedule"] = list(snap.get("vent_schedule") or VENT_SCHEDULE)
     return snap
 
 @app.get("/api/command")
@@ -971,6 +1006,29 @@ async def set_location(req: LocationRequest):
         "message": f"측정소가 {new_station}으로 변경되었습니다",
     }
 
+@app.post("/api/schedule")
+async def set_schedule(req: ScheduleRequest):
+    """정기 환기 시각 저장 (처음 접속했을 때 / 나중에 변경할 때)"""
+    try:
+        times = check_schedule(req.times)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+
+    with state_lock:
+        state["vent_schedule"] = times
+        state["slot_pending"] = None     # 예전 시각으로 기다리던 회차는 '건너뜀'으로 남기지 않음
+        state["updated_at"] = now_str()
+
+    label = " · ".join(times)
+    reason = f"정기 환기 시각을 기본값({label})으로 정했어요" if req.preset == "later" else f"정기 환기 시각 변경 → {label}"
+    print(f"[SCHEDULE {now_str()}] {label} ({req.preset})")
+    add_event("schedule", reason, "manual")
+    save_settings()
+    if state["mode"] == "auto":
+        recheck_auto()
+    return {"ok": True, "times": times}
+
+
 # 타이머 관련
 @app.post("/api/window/timer")
 async def set_timer(req: TimerRequest):
@@ -1058,7 +1116,7 @@ async def startup():
         # 지난번에 쓰던 모드·위치 복원
         saved = db.get_settings()
         with state_lock:
-            for key in ("mode", "lat", "lon", "station"):
+            for key in ("mode", "lat", "lon", "station", "vent_schedule"):
                 if saved.get(key) is not None:
                     state[key] = saved[key]
         if saved:

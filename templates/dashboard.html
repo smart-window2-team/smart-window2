@@ -128,6 +128,13 @@
           <span id="whyLabel">왜 열렸나요?</span>
           <svg class="ic ic-sm"><use href="#i-chevron"/></svg>
         </button>
+
+        <!-- 정기 환기 시각 (눌러서 변경) -->
+        <button class="schedule-link" onclick="openSchedule(false)">
+          <svg class="ic ic-sm"><use href="#i-clock"/></svg>
+          <span>정기 환기 <span id="scheduleText">-</span></span>
+          <span class="schedule-edit">변경</span>
+        </button>
       </div>
 
       <!-- 모바일: 옆 페이지가 있다는 안내 -->
@@ -367,6 +374,44 @@
   </div>
 </div>
 
+<!-- 정기 환기 시각 시트 (처음 접속했을 때 한 번 / 변경할 때) -->
+<div class="sheet-backdrop" id="scheduleSheet" onclick="backdropClose(event)">
+  <div class="sheet" role="dialog" aria-modal="true" aria-labelledby="scheduleTitle">
+    <div class="sheet-handle"></div>
+    <div class="sheet-head">
+      <h2 id="scheduleTitle">정기 환기 시간을 정해 주세요</h2>
+      <button class="icon-btn" onclick="closeSheet('scheduleSheet')" aria-label="닫기"><svg class="ic"><use href="#i-x"/></svg></button>
+    </div>
+    <p class="sheet-desc">하루 3번, 정해진 시간에 30분씩 환기해요.<br>비가 오거나 바람이 강하면 그 회차는 건너뛰어요.</p>
+    <div class="schedule-options">
+      <button class="schedule-opt" data-kind="home" onclick="pickSchedule('home')">
+        <span class="opt-label">집에 주로 있어요 <span class="opt-tag">추천</span></span>
+        <span class="opt-times">10:00 · 15:00 · 20:00</span>
+        <span class="opt-desc">오전 · 오후 · 저녁에 고르게</span>
+      </button>
+      <button class="schedule-opt" data-kind="out" onclick="pickSchedule('out')">
+        <span class="opt-label">낮에는 외출해요 <span class="opt-tag">추천</span></span>
+        <span class="opt-times">07:30 · 19:00 · 21:30</span>
+        <span class="opt-desc">출근 전 · 퇴근 후 · 자기 전</span>
+      </button>
+      <button class="schedule-opt" data-kind="custom" onclick="pickSchedule('custom')">
+        <span class="opt-label">직접 정하기</span>
+        <span class="opt-desc">시간끼리 2시간 이상 떨어지게 정해 주세요</span>
+      </button>
+    </div>
+    <div class="schedule-custom" id="scheduleCustom" hidden>
+      <input type="time" id="schT1" aria-label="첫 번째 정기 환기 시각">
+      <input type="time" id="schT2" aria-label="두 번째 정기 환기 시각">
+      <input type="time" id="schT3" aria-label="세 번째 정기 환기 시각">
+    </div>
+    <p class="schedule-error" id="scheduleError" role="alert"></p>
+    <div class="btn-pair">
+      <button class="btn btn-gray" id="scheduleLater" onclick="laterSchedule()">나중에</button>
+      <button class="btn btn-primary" id="scheduleSave" onclick="saveSchedule()">저장</button>
+    </div>
+  </div>
+</div>
+
 <!-- 확인 시트 (confirm 대체) -->
 <div class="sheet-backdrop" id="confirmSheet" onclick="backdropClose(event)">
   <div class="sheet sheet-narrow" role="alertdialog" aria-modal="true" aria-labelledby="confirmTitle">
@@ -494,6 +539,8 @@ function openSheet(id){
 }
 
 function closeSheet(id){
+  // 처음 정기 환기 시각을 묻는 중에 그냥 닫으면 "나중에"와 같게 처리
+  if(id === 'scheduleSheet' && scheduleOnboarding){ laterSchedule(); return; }
   $(id).classList.remove('open');
   if(!document.querySelector('.sheet-backdrop.open')) document.body.classList.remove('sheet-open');
   // 확인 시트를 그냥 닫으면 "취소"로 처리
@@ -590,13 +637,13 @@ document.querySelectorAll('.sheet-backdrop').forEach(backdrop => {
 // 토스트 / 확인 (alert, confirm 대체)
 // ════════════════════════════════════════════════════
 let toastTimer = null;
-function toast(msg, isError=false){
+function toast(msg, isError=false, ms=2600){
   const el = $('toast');
   el.textContent = msg;
   el.classList.toggle('error', isError);
   el.classList.add('show');
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => el.classList.remove('show'), 2600);
+  toastTimer = setTimeout(() => el.classList.remove('show'), ms);
 }
 
 let confirmResolve = null;
@@ -724,6 +771,79 @@ async function api(path, body){
   const r = await fetch(path, opts);
   if(!r.ok) throw new Error((await r.json()).detail || 'failed');
   return r.json();
+}
+
+// ════════════════════════════════════════════════════
+// 정기 환기 시각 (처음 접속했을 때 한 번 묻고, 창문 화면에서 변경)
+// ════════════════════════════════════════════════════
+const SCHEDULE_PRESETS = {
+  home: ['10:00', '15:00', '20:00'],   // 집에 주로 있어요 (기본값, "나중에"도 이걸로)
+  out:  ['07:30', '19:00', '21:30'],   // 낮에는 외출해요
+};
+let scheduleChoice = 'home';
+let scheduleOnboarding = false;   // 처음 묻는 중인가 (닫으면 "나중에"로 처리)
+let scheduleAsked = false;        // 이 화면에서 이미 물어봤는가
+
+function renderSchedule(s){
+  $('scheduleText').textContent = (s.vent_schedule || []).join(' · ');
+  if(s.vent_schedule_set === false && !scheduleAsked){
+    scheduleAsked = true;
+    openSchedule(true);
+  }
+}
+
+function openSchedule(onboarding){
+  scheduleOnboarding = onboarding;
+  const now = lastState.vent_schedule || SCHEDULE_PRESETS.home;
+  const preset = Object.keys(SCHEDULE_PRESETS).find(k => SCHEDULE_PRESETS[k].join() === now.join());
+  $('scheduleTitle').textContent = onboarding ? '정기 환기 시간을 정해 주세요' : '정기 환기 시간 변경';
+  $('scheduleLater').textContent = onboarding ? '나중에' : '취소';
+  ['schT1', 'schT2', 'schT3'].forEach((id, i) => $(id).value = now[i] || '');
+  $('scheduleError').textContent = '';
+  pickSchedule(onboarding ? 'home' : (preset || 'custom'));
+  openSheet('scheduleSheet');
+}
+
+function pickSchedule(kind){
+  scheduleChoice = kind;
+  document.querySelectorAll('.schedule-opt').forEach(b => {
+    const on = b.dataset.kind === kind;
+    b.classList.toggle('selected', on);
+    b.setAttribute('aria-pressed', on);
+  });
+  $('scheduleCustom').hidden = kind !== 'custom';
+  $('scheduleError').textContent = '';
+}
+
+async function saveSchedule(){
+  const times = scheduleChoice === 'custom'
+    ? ['schT1', 'schT2', 'schT3'].map(id => $(id).value)
+    : SCHEDULE_PRESETS[scheduleChoice];
+  if(times.some(t => !t)){ $('scheduleError').textContent = '시간 3개를 모두 정해 주세요'; return; }
+  try {
+    const r = await api('/api/schedule', { times, preset: scheduleChoice });
+    scheduleOnboarding = false;
+    closeSheet('scheduleSheet');
+    toast(`정기 환기 시간을 ${r.times.join(' · ')}로 정했어요`);
+    refresh();
+  } catch(e){
+    $('scheduleError').textContent = e.message;
+  }
+}
+
+// "나중에": 추천 1번(10:00 · 15:00 · 20:00)으로 진행한다고 알리고 저장
+async function laterSchedule(){
+  if(!scheduleOnboarding){ closeSheet('scheduleSheet'); return; }
+  scheduleOnboarding = false;
+  closeSheet('scheduleSheet');
+  const times = SCHEDULE_PRESETS.home;
+  try {
+    await api('/api/schedule', { times, preset: 'later' });
+    toast(`추천 시간(${times.join(' · ')})으로 정기 환기를 진행할게요. 창문 화면에서 언제든 바꿀 수 있어요`, false, 5000);
+    refresh();
+  } catch(e){
+    toast('정기 환기 시간을 저장하지 못했어요: ' + e.message, true);
+  }
 }
 
 // ════════════════════════════════════════════════════
@@ -974,6 +1094,7 @@ async function refresh(){
     syncCount('vent', s.vent_remaining);
     syncCount('rest', s.vent_rest_remaining);
     renderHeroReason();
+    renderSchedule(s);
     const modeText = s.mode === 'auto' ? '자동 모드' : '수동 모드';
     $('heroMeta').textContent = `${modeText} · ${timeOf(s.updated_at)} 기준` + (s.vent_cycle_test ? ' · 환기 주기 테스트 중' : '');
     $('heroMeta').classList.remove('offline');
