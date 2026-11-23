@@ -10,3 +10,6 @@
 !templates/dashboard.html
 !static/
 !static/style.css
+!docs/
+!docs/images/
+!docs/images/*.png
