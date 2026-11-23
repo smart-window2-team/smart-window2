@@ -140,55 +140,85 @@
       </button>
     </section>
 
-    <!-- 2. 공기 -->
+    <!-- 2. 공기: 결론 → 비교 → 근거 -->
     <section class="page page-air">
-      <div class="section-head">
-        <h3 class="section-title">현재 바깥/실내 공기</h3>
+      <!-- ① 한 줄 결론 -->
+      <div class="card air-verdict" id="airVerdict" data-tone="none">
+        <span class="av-icon" id="avIcon"><svg class="ic"><use href="#i-leaf"/></svg></span>
+        <div class="av-text">
+          <p class="av-title" id="avTitle">공기 상태를 확인하고 있어요</p>
+          <p class="av-sub" id="avSub"></p>
+        </div>
       </div>
-      <div class="tiles">
-        <button class="tile" onclick="openDetail('weather')">
-          <div class="tile-head">
-            <span class="tile-icon" id="weatherIcon"><svg class="ic"><use href="#i-sun"/></svg></span>
-          </div>
-          <div class="tile-label">바깥 날씨</div>
-          <div class="tile-value" id="tv_weather">-</div>
-          <div class="tile-sub" id="ts_weather">-</div>
-          <svg class="ic tile-go" aria-hidden="true"><use href="#i-chevron"/></svg>
-        </button>
 
-        <button class="tile" onclick="openDetail('air')">
-          <div class="tile-head">
-            <span class="tile-icon"><svg class="ic"><use href="#i-wind"/></svg></span>
-            <span class="chip" id="tc_air"></span>
-          </div>
-          <div class="tile-label">바깥 초미세먼지</div>
-          <div class="tile-value" id="tv_air">-</div>
-          <div class="tile-sub" id="ts_air">-</div>
-          <svg class="ic tile-go" aria-hidden="true"><use href="#i-chevron"/></svg>
-        </button>
+      <!-- ② 바깥 · 실내 초미세먼지 비교 -->
+      <button class="card compare-card" onclick="openDetail('dust')">
+        <div class="cmp-head">
+          <span class="cmp-title">바깥 · 실내 초미세먼지</span>
+          <svg class="ic ic-sm cmp-go" aria-hidden="true"><use href="#i-chevron"/></svg>
+        </div>
+        <div class="cmp-row" id="cmpOut" data-grade="unknown">
+          <span class="cmp-who">바깥</span>
+          <span class="cmp-bar"><i></i></span>
+          <span class="cmp-grade">-</span>
+          <span class="cmp-num"></span>
+        </div>
+        <div class="cmp-row" id="cmpIn" data-grade="unknown">
+          <span class="cmp-who">실내</span>
+          <span class="cmp-bar"><i></i></span>
+          <span class="cmp-grade">-</span>
+          <span class="cmp-num"></span>
+        </div>
+        <p class="cmp-note" id="cmpNote"></p>
+      </button>
 
-        <button class="tile" id="tileCo2" onclick="openDetail('indoor')">
-          <div class="tile-head">
-            <span class="tile-icon"><svg class="ic"><use href="#i-leaf"/></svg></span>
-            <span class="chip" id="tc_co2"></span>
+      <!-- ③ 실내 센서 (이산화탄소·온도·습도) / 바깥 날씨 — 같은 모양으로 위아래 비교 -->
+      <button class="card stat-card" id="indoorCard" onclick="openDetail('indoor')">
+        <div class="cmp-head">
+          <span class="cmp-title">실내 센서</span>
+          <span class="stat-state" id="indoorState"></span>
+          <svg class="ic ic-sm cmp-go" aria-hidden="true"><use href="#i-chevron"/></svg>
+        </div>
+        <div class="stat-grid">
+          <div class="stat">
+            <span class="stat-label">이산화탄소</span>
+            <span class="stat-value" id="sv_co2">—</span>
+            <span class="stat-sub" id="ss_co2"></span>
           </div>
-          <div class="tile-label">실내 이산화탄소</div>
-          <div class="tile-value" id="tv_co2">-</div>
-          <div class="tile-sub" id="ts_co2">-</div>
-          <svg class="ic tile-go" aria-hidden="true"><use href="#i-chevron"/></svg>
-        </button>
+          <div class="stat">
+            <span class="stat-label">온도</span>
+            <span class="stat-value" id="sv_itemp">—</span>
+          </div>
+          <div class="stat">
+            <span class="stat-label">습도</span>
+            <span class="stat-value" id="sv_ihum">—</span>
+          </div>
+        </div>
+      </button>
 
-        <button class="tile" id="tileInpm" onclick="openDetail('indoor')">
-          <div class="tile-head">
-            <span class="tile-icon"><svg class="ic"><use href="#i-dust"/></svg></span>
-            <span class="chip" id="tc_inpm"></span>
+      <button class="card stat-card" onclick="openDetail('weather')">
+        <div class="cmp-head">
+          <span class="cmp-title">바깥 날씨</span>
+          <span class="stat-state" id="weatherState"></span>
+          <svg class="ic ic-sm cmp-go" aria-hidden="true"><use href="#i-chevron"/></svg>
+        </div>
+        <div class="stat-grid">
+          <div class="stat">
+            <span class="stat-label">기온</span>
+            <span class="stat-value" id="sv_otemp">—</span>
           </div>
-          <div class="tile-label">실내 초미세먼지</div>
-          <div class="tile-value" id="tv_inpm">-</div>
-          <div class="tile-sub" id="ts_inpm">-</div>
-          <svg class="ic tile-go" aria-hidden="true"><use href="#i-chevron"/></svg>
-        </button>
-      </div>
+          <div class="stat">
+            <span class="stat-label">습도</span>
+            <span class="stat-value" id="sv_ohum">—</span>
+          </div>
+          <div class="stat">
+            <span class="stat-label">바람</span>
+            <span class="stat-value" id="sv_wind">—</span>
+            <span class="stat-sub" id="ss_wind"></span>
+          </div>
+        </div>
+      </button>
+
       <div class="card rain-card" id="rainCard" hidden>
         <div class="rain-head"><svg class="ic"><use href="#i-rain"/></svg><span id="rainHead">비 소식</span></div>
         <div class="rain-body">
@@ -196,7 +226,9 @@
           <span class="rain-pop" id="rainPop"></span>
         </div>
       </div>
-      <p class="data-source" id="dataSource"></p>
+
+      <!-- 출처는 한 줄만, 자세한 건 눌러서 -->
+      <button class="data-source" id="dataSource" onclick="openDetail('source')"></button>
     </section>
 
     <!-- 3. 추이 -->
@@ -794,6 +826,119 @@ let lastState = {};
 const row = (label, value, grade='unknown') =>
   `<div class="row"><span class="row-label">${label}</span><span class="row-value">${value}${chip(grade)}</span></div>`;
 
+// ════════════════════════════════════════════════════
+// 공기 탭: ① 한 줄 결론 → ② 바깥·실내 비교 → ③ 근거 (이산화탄소, 날씨, 비 소식)
+// 숫자를 해석하지 않아도 되도록 등급(좋음·보통…)을 크게, 숫자는 작게
+// ════════════════════════════════════════════════════
+const INDOOR_DIRTY_GAP = 5;                        // 서버 판단 기준과 같음 (실내가 바깥보다 이만큼 높고
+const INDOOR_DIRTY_MIN = { pm25: 15, pm10: 30 };   //  이 값 이상이면 '실내가 더 탁함')
+
+// ① 지금 공기로 본 결론 한 줄 (서버 판단 순서와 같게: 비·바람 → 바깥 미세먼지 → 실내)
+function airVerdict(s, indoorOk){
+  const w = s.weather, a = s.air, auto = s.mode === 'auto';
+  const venting = s.window_status === 'open';
+  if(s.refreshing) return { tone:'none', icon:'pin', title:'새 위치의 공기 정보를 불러오고 있어요', sub:'' };
+  if(!w || !a) return { tone:'none', icon:'alert', title:'바깥 정보를 받지 못했어요', sub:'곧 다시 시도할게요 · 그동안 창문은 닫아 둬요' };
+
+  if(w.precipitation_code){
+    const snow = w.precipitation === 'snow';
+    return { tone:'rain', icon: snow ? 'snow' : 'rain', title: snow ? '지금 눈이 와요' : '지금 비가 와요',
+             sub: auto ? '그칠 때까지 창문을 닫아 둘게요' : '창문을 닫아 두는 게 좋아요' };
+  }
+  const wind = has(w.wind_judge) ? w.wind_judge : w.wind_speed;
+  if(wind >= 5){
+    return { tone:'rain', icon:'wind', title:'바람이 강해요',
+             sub: auto ? '바람이 잦아들 때까지 창문을 닫아 둘게요' : '창문을 닫아 두는 게 좋아요' };
+  }
+  const out = worstGrade([gradePM10(a.pm10), gradePM25(a.pm25)]);
+  if(out === 'vbad'){
+    return { tone:'bad', icon:'dust', title:'바깥 미세먼지가 매우 나빠요',
+             sub: auto ? '창문을 닫아 두고, 실내가 많이 답답할 때만 잠깐 열게요' : '창문을 닫아 두는 게 좋아요' };
+  }
+  if(out === 'bad'){
+    return { tone:'warn', icon:'dust', title:'바깥 미세먼지가 나빠요',
+             sub: venting ? '지금 짧게 환기하고 있어요' : auto ? '환기가 필요할 때 10분만 짧게 열게요' : '환기는 짧게만 하는 게 좋아요' };
+  }
+  if(indoorOk){
+    const i = s.indoor;
+    if(has(i.co2) && i.co2 >= 1000){
+      return { tone:'warn', icon:'leaf', title:'실내 공기가 답답해요',
+               sub: venting ? '지금 창문을 열어 환기하고 있어요' : '이산화탄소가 높아요 · 바깥 공기가 괜찮아서 환기하기 좋아요' };
+    }
+    const dirty = ['pm25', 'pm10'].some(k => has(i[k]) && has(a[k]) && i[k] >= INDOOR_DIRTY_MIN[k] && i[k] - a[k] >= INDOOR_DIRTY_GAP);
+    if(dirty){
+      return { tone:'warn', icon:'dust', title:'실내가 바깥보다 탁해요',
+               sub: venting ? '지금 창문을 열어 환기하고 있어요' : '바깥 공기가 더 깨끗해서 환기하기 좋아요' };
+    }
+    return { tone:'ok', icon:'check', title:'실내외 공기 모두 괜찮아요',
+             sub: venting ? '지금 창문을 열어 환기하고 있어요'
+               : `지금은 환기할 필요가 없어요${s.next_vent_at ? ` · 다음 정기 환기 ${s.next_vent_at}` : ''}` };
+  }
+  return { tone:'ok', icon:'check', title:'바깥 공기는 괜찮아요', sub:'실내 센서가 연결되면 실내와 비교해 드릴게요' };
+}
+
+// ② 비교 막대 한 줄 (막대 길이: 초미세먼지 75 = '매우나쁨' 시작을 끝으로)
+function setCompareRow(id, v, emptyText, stale){
+  const el = $(id), g = gradePM25(v);
+  el.dataset.grade = g;
+  el.classList.toggle('stale', !!stale);
+  el.querySelector('i').style.width = has(v) ? `${Math.max(4, Math.min(100, v / 75 * 100))}%` : '0';
+  el.querySelector('.cmp-grade').textContent = has(v) ? gradeLabel[g] : emptyText;
+  el.querySelector('.cmp-num').textContent = has(v) ? fmt(v, 0) : '';
+}
+
+function compareNote(o, i, indoorState){
+  if(!has(o)) return '바깥 측정값이 없어요 · 측정소 점검 중일 수 있어요';
+  if(indoorState === 'none') return '실내 센서가 연결되면 바깥과 비교해 드려요';
+  if(!has(i)) return '실내 초미세먼지 값이 아직 없어요';
+  if(indoorState === 'stale') return '실내 값은 연결이 끊기기 전 마지막 값이에요';
+  const diff = i - o;
+  if(Math.abs(diff) < 3) return '실내와 바깥이 비슷해요';
+  return diff < 0 ? '실내가 바깥보다 깨끗해요' : '실내가 바깥보다 탁해요';
+}
+
+function renderAir(s, conn){
+  const w = s.weather || {}, a = s.air || {}, i = s.indoor || {};
+  const hasIndoor = Object.keys(i).length > 0;
+  const stale = hasIndoor && conn === 'offline';
+  const indoorOk = hasIndoor && !stale;
+
+  // ① 결론
+  const v = airVerdict(s, indoorOk);
+  $('airVerdict').dataset.tone = v.tone;
+  $('avIcon').innerHTML = icon(v.icon);
+  $('avTitle').textContent = v.title;
+  $('avSub').textContent = v.sub;
+
+  // ② 바깥 · 실내 비교
+  setCompareRow('cmpOut', s.refreshing ? null : a.pm25, s.refreshing ? '불러오는 중' : '-');
+  setCompareRow('cmpIn', hasIndoor ? i.pm25 : null, '센서 연결 대기 중', stale);
+  $('cmpNote').textContent = s.refreshing ? '새 위치 정보를 불러오는 중…'
+    : compareNote(a.pm25, i.pm25, !hasIndoor ? 'none' : stale ? 'stale' : 'ok');
+
+  // ③ 실내 센서: 이산화탄소(등급 함께)·온도·습도
+  const num = (v, d, unit) => has(v) ? `${fmt(v, d)}<span class="unit">${unit}</span>` : '—';
+  $('indoorCard').classList.toggle('stale', stale);
+  $('indoorState').textContent = !hasIndoor ? '센서 연결 대기 중' : stale ? '연결 끊김 · 마지막 값' : '';
+  $('indoorState').classList.toggle('warn', stale);
+  $('sv_co2').innerHTML = num(i.co2, 0, 'ppm');
+  const g = gradeCO2(i.co2);
+  $('ss_co2').innerHTML = has(i.co2) ? `<span class="grade-text ${g}">${gradeLabel[g]}</span>` : '';
+  $('sv_itemp').innerHTML = num(i.temperature, 1, '°C');
+  $('sv_ihum').innerHTML = num(i.humidity, 0, '%');
+
+  // ③ 바깥 날씨: 기온·습도·바람 (실내 센서와 같은 자리에 놓아 비교하기 쉽게)
+  $('weatherState').innerHTML = s.refreshing ? '불러오는 중…'
+    : has(w.temperature) ? `${icon(weatherIconName(w))}${skyOrPrec(w)}` : '불러오지 못했어요';
+  $('sv_otemp').innerHTML = num(w.temperature, 1, '°C');
+  $('sv_ohum').innerHTML = num(w.humidity, 0, '%');
+  $('sv_wind').innerHTML = num(w.wind_speed, 1, 'm/s');
+  $('ss_wind').textContent = windShort(w.wind_speed);
+
+  renderRain(s);
+  renderSource(s);
+}
+
 // 비 소식 카드 (기상청 단기예보, 앞으로 48시간)
 // "2026-11-03 15:00" → "내일 오후 3시"
 function whenText(ts, today){
@@ -808,8 +953,9 @@ const RAIN_WORD = { rain:'비', drizzle:'비', rain_snow:'비나 눈', sleet:'�
 
 function renderRain(s){
   const r = s.rain_outlook;
-  $('rainCard').hidden = !r;
-  if(!r) return;
+  const rainingNow = !!(s.weather && s.weather.precipitation_code);
+  $('rainCard').hidden = !r || rainingNow;
+  if(!r || rainingNow) return;
   const today = (s.server_time || '').split(' ')[0];
   const word = r.next_rain ? (RAIN_WORD[r.next_rain.type] || '비') : '비';
   if(r.next_rain){
@@ -825,20 +971,10 @@ function renderRain(s){
   }
 }
 
-// 출처와 업데이트 시각 (공기 탭 맨 아래)
+// 출처와 업데이트 시각 (공기 탭 맨 아래, 한 줄만 · 눌러서 자세히)
 function renderSource(s){
-  const w = s.weather || {}, a = s.air || {};
-  const station = a.station || s.station;
-  const times = [
-    w.forecast_at && `날씨 ${w.forecast_at} 예보`,
-    s.rain_outlook && `비 소식 ${s.rain_outlook.base_at} 발표`,
-    w.observed_at && `${w.observed_at} 관측`,
-    a.measured_at && `대기질 ${timeOf(a.measured_at)} 측정`,
-  ].filter(Boolean).join(' · ');
-  $('dataSource').innerHTML =
-    `출처: 기상청 · 에어코리아${station ? ` (${escapeHTML(station)} 측정소)` : ''}` +
-    (times ? `<br>${times}` : '') +
-    (s.outdoor_updated_at ? `<br>업데이트 ${timeOf(s.outdoor_updated_at)}` : '');
+  const at = s.outdoor_updated_at ? `${timeOf(s.outdoor_updated_at)} 업데이트 · ` : '';
+  $('dataSource').innerHTML = `${at}기상청 · 에어코리아 <svg class="ic ic-xs"><use href="#i-chevron"/></svg>`;
 }
 
 function openDetail(type){
@@ -865,6 +1001,31 @@ function openDetail(type){
       row('오존 (O₃)', `${fmt(a.o3, 4)}ppm`) +
       row('이산화질소 (NO₂)', `${fmt(a.no2, 4)}ppm`) +
       row('측정 시각', a.measured_at || '-');
+  }
+  else if(type === 'dust'){
+    title.textContent = '바깥 · 실내 미세먼지';
+    const a = lastState.air || {}, i = lastState.indoor || {};
+    const pm = v => has(v) ? `${fmt(v, 0)}㎍/㎥` : '-';
+    body.innerHTML =
+      row('바깥 초미세먼지', pm(a.pm25), gradePM25(a.pm25)) +
+      row('실내 초미세먼지', pm(i.pm25), gradePM25(i.pm25)) +
+      row('바깥 미세먼지', pm(a.pm10), gradePM10(a.pm10)) +
+      row('실내 미세먼지', pm(i.pm10), gradePM10(i.pm10)) +
+      `<p class="detail-note">초미세먼지(PM2.5)는 지름 2.5㎛ 이하의 아주 작은 먼지로, 미세먼지(PM10)보다 폐 깊숙이 들어가요.
+       등급은 환경부 기준이에요. 실내가 바깥보다 확실히 탁하면 창문을 열어 환기해요.</p>`;
+  }
+  else if(type === 'source'){
+    title.textContent = '정보 출처';
+    const w = lastState.weather || {}, a = lastState.air || {}, r = lastState.rain_outlook;
+    const station = a.station || lastState.station;
+    body.innerHTML =
+      row('날씨', '기상청 단기예보') +
+      row('미세먼지', `에어코리아${station ? ` · ${escapeHTML(station)} 측정소` : ''}`) +
+      row('날씨 기준 시각', [w.forecast_at && `${w.forecast_at} 예보`, w.observed_at && `${w.observed_at} 관측`].filter(Boolean).join(' · ') || '-') +
+      row('비 소식 발표', r ? `${r.base_at} 발표` : '-') +
+      row('미세먼지 측정', a.measured_at ? `${timeOf(a.measured_at)} 측정` : '-') +
+      row('마지막 업데이트', lastState.outdoor_updated_at ? timeOf(lastState.outdoor_updated_at) : '-') +
+      `<p class="detail-note">바깥 정보는 10분마다 새로 받아요. 기상청과 에어코리아는 보통 1시간마다 값을 발표해요.</p>`;
   }
   else if(type === 'indoor'){
     title.textContent = '실내 공기';
@@ -1422,61 +1583,8 @@ async function refresh(){
     }
     if(hadTimer !== !$('timerBar').hidden) syncDockSpace();   // 패널 높이가 바뀜
 
-    // 타일 - 바깥 날씨
-    const w = s.weather || {};
-    $('weatherIcon').innerHTML = icon(weatherIconName(w));
-    $('tv_weather').innerHTML = valueHTML(w.temperature, 1, '°C');
-    const loadingText = '새 위치 정보를 불러오는 중…';
-    $('ts_weather').textContent = s.refreshing ? loadingText
-      : has(w.temperature) ? `${skyOrPrec(w)} · ${windShort(w.wind_speed)} ${fmt(w.wind_speed)}m/s`
-      : '불러오지 못했어요 · 곧 다시 시도해요';
-
-    renderSource(s);
-    renderRain(s);
-
-    // 타일 - 바깥 공기
-    const a = s.air || {};
-    $('tv_air').innerHTML = valueHTML(a.pm25, 0, '㎍/㎥');
-    setChip($('tc_air'), worstGrade([gradePM10(a.pm10), gradePM25(a.pm25)]));
-    if(s.refreshing){
-      $('ts_air').textContent = loadingText;
-    } else if(!s.air){
-      $('ts_air').textContent = '불러오지 못했어요 · 곧 다시 시도해요';
-    } else if(!has(a.pm25)){
-      $('ts_air').textContent = '측정소 점검 중이에요';   // 에어코리아가 "-"를 준 경우
-    } else {
-      $('ts_air').textContent = `미세먼지 ${fmt(a.pm10, 0)} · ${timeOf(a.measured_at)} 측정`;
-    }
-
-    // 타일 - 실내
-    const i = s.indoor || {};
-    const noIndoor = Object.keys(i).length === 0;
-    $('tv_co2').innerHTML = valueHTML(i.co2, 0, 'ppm');
-    setChip($('tc_co2'), gradeCO2(i.co2));
-    $('ts_co2').textContent = noIndoor ? '센서 연결 대기 중'
-      : [has(i.temperature) ? `${fmt(i.temperature, 1)}°C` : null,
-         has(i.humidity) ? `습도 ${fmt(i.humidity, 0)}%` : null].filter(Boolean).join(' · ') || '-';
-
-    $('tv_inpm').innerHTML = valueHTML(i.pm25, 0, '㎍/㎥');
-    setChip($('tc_inpm'), gradePM25(i.pm25));
-    if(noIndoor){
-      $('ts_inpm').textContent = '센서 연결 대기 중';
-    } else if(has(i.pm25) && has(a.pm25)){
-      const diff = Math.round(i.pm25 - a.pm25);
-      $('ts_inpm').textContent = diff === 0 ? '바깥과 같아요'
-        : `바깥보다 ${Math.abs(diff)} ${diff > 0 ? '높아요' : '낮아요'}`;
-    } else {
-      $('ts_inpm').textContent = '-';
-    }
-
-    // 연결이 끊겼으면 실내 타일을 흐리게 + 마지막 값이라고 표시
-    const stale = conn === 'offline';
-    $('tileCo2').classList.toggle('stale', stale);
-    $('tileInpm').classList.toggle('stale', stale);
-    if(stale){
-      $('ts_co2').textContent = '연결 끊김 · 마지막 값이에요';
-      $('ts_inpm').textContent = '연결 끊김 · 마지막 값이에요';
-    }
+    // 공기 탭: 결론 → 비교 → 근거
+    renderAir(s, conn);
 
     // 직접 조작 (수동 모드 패널)
     const manual = s.mode === 'manual';
