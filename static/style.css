@@ -1149,6 +1149,7 @@ body.manual .dock { transform: none; }
 .sw.normal { background: #FFE2A0; }
 .sw.bad    { background: #FFCBA6; }
 .sw.vbad   { background: #FFC2C8; }
+.sw.open   { background: rgba(49, 130, 246, .35); }
 
 /* 비교 차트 선 범례 */
 .legend .series {

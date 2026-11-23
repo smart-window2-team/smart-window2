@@ -249,27 +249,25 @@
 
       <div class="chart-controls">
         <div class="pills" id="metricPills">
-          <button class="pill active" data-metric="overall" onclick="switchChartMetric(this)">종합</button>
+          <button class="pill active" data-metric="co2" onclick="switchChartMetric(this)">이산화탄소</button>
           <button class="pill" data-metric="pm25" onclick="switchChartMetric(this)">초미세먼지</button>
           <button class="pill" data-metric="pm10" onclick="switchChartMetric(this)">미세먼지</button>
-          <button class="pill" data-metric="co2" onclick="switchChartMetric(this)">이산화탄소</button>
-          <button class="pill" data-metric="compare" onclick="switchChartMetric(this)">실내·바깥 초미세먼지 비교</button>
         </div>
-        <div class="segmented segmented-sm" id="hoursSeg">
-          <button class="active" data-hours="1" onclick="switchChartHours(this)">1시간</button>
-          <button data-hours="6" onclick="switchChartHours(this)">6시간</button>
-          <button data-hours="24" onclick="switchChartHours(this)">24시간</button>
+        <div class="segmented segmented-sm" id="daySeg">
+          <button class="active" data-day="today" onclick="switchChartDay(this)">오늘</button>
+          <button data-day="yesterday" onclick="switchChartDay(this)">어제</button>
         </div>
       </div>
 
       <div class="chart-wrapper">
         <canvas id="indoorChart"></canvas>
         <div class="chart-empty" id="chartEmpty" hidden>
-          아직 데이터가 없어요<br>라즈베리파이에서 센서 값이 들어오면 보여드릴게요
+          <span id="chartEmptyText">아직 데이터가 없어요</span><br>라즈베리파이에서 센서 값이 들어오면 보여드릴게요
         </div>
       </div>
 
       <div class="legend">
+        <span><i class="sw open"></i>창문 열림</span>
         <span class="series" id="seriesLegend" hidden>
           <span><i class="ln"></i>실내</span>
           <span><i class="ln dash"></i>바깥</span>
@@ -1829,22 +1827,22 @@ async function saveLocation() {
 // - 가로축은 실제 시간 (센서가 꺼져 있던 구간은 끊겨 보임)
 // ════════════════════════════════════════════════════
 let indoorChart = null;
-let chartMetric = 'overall';   // overall / pm25 / pm10 / co2 / compare
-let chartHours = 1;            // 1 / 6 / 24
+let chartMetric = 'co2';       // co2 / pm25 / pm10
+let chartDay = 'today';        // today(오늘 0시~지금) / yesterday(어제 하루)
 
 const METRICS = {
   overall: { name:'종합 공기질', unit:'',      desc:'초미세먼지·미세먼지·CO₂ 중 가장 나쁜 등급이에요' },
-  pm25:    { name:'초미세먼지',   unit:'㎍/㎥', cuts:[15, 35, 75],      grade: gradePM25 },
-  pm10:    { name:'미세먼지',     unit:'㎍/㎥', cuts:[30, 80, 150],     grade: gradePM10 },
-  co2:     { name:'이산화탄소',   unit:'ppm',   cuts:[700, 1000, 2000], grade: gradeCO2 },
-  compare: { name:'초미세먼지',   unit:'㎍/㎥', cuts:[15, 35, 75],      grade: gradePM25,
-             desc:'파란 선(실내)이 회색 선(바깥)보다 위에 있으면 실내가 더 탁해서 환기해요' },
+  pm25:    { name:'초미세먼지',   unit:'㎍/㎥', cuts:[15, 35, 75],      grade: gradePM25, outdoor: true,
+             desc:'점선은 바깥 값이에요 · 실선(실내)이 점선보다 위면 실내가 더 탁해서 환기해요' },
+  pm10:    { name:'미세먼지',     unit:'㎍/㎥', cuts:[30, 80, 150],     grade: gradePM10, outdoor: true,
+             desc:'점선은 바깥 값이에요 · 실선(실내)이 점선보다 위면 실내가 더 탁해서 환기해요' },
+  co2:     { name:'이산화탄소',   unit:'ppm',   cuts:[700, 1000, 2000], grade: gradeCO2,
+             desc:'파란 띠는 창문을 연 시간이에요 · 띠 안에서 내려가면 환기가 잘 된 거예요' },
 };
 const INDOOR_GAP_MS = 5 * 60 * 1000;    // 실내 로그는 1분 간격 → 5분 넘게 비면 선을 끊음
 const OUTDOOR_GAP_MS = 25 * 60 * 1000;  // 바깥 로그는 10분 간격
-const TICK_STEP_MIN = { 1: 10, 6: 60, 24: 240 };
-// 점 하나로 묶는 간격(분). 0 = 묶지 않고 1분 기록 그대로 (저장은 항상 1분, 그릴 때만 평균)
-const BUCKET_MIN = { 1: 5, 6: 0, 24: 0 };
+const CHART_BUCKET_MIN = 5;             // 점 하나 = 5분 평균 (저장은 1분, 그릴 때만 평균)
+const OPEN_BAND_COLOR = 'rgba(49, 130, 246, .26)';
 const INDOOR_KEYS = ['co2', 'pm25', 'pm10', 'temperature', 'humidity'];
 const BAND_COLORS = {
   good:   'rgba(29, 179, 107, .10)',
@@ -1867,6 +1865,25 @@ const gradeBands = {
       if(bottom <= top) continue;
       ctx.fillStyle = BAND_COLORS[b.grade];
       ctx.fillRect(area.left, top, area.right - area.left, bottom - top);
+    }
+    ctx.restore();
+  }
+};
+
+// 창문이 열려 있던 시간을 세로 띠로 칠하는 플러그인
+const openBands = {
+  id: 'openBands',
+  beforeDatasetsDraw(chart, args, opts){
+    const spans = opts.spans || [];
+    const { ctx, chartArea: area, scales: { x } } = chart;
+    if(!area || !x) return;
+    ctx.save();
+    ctx.fillStyle = OPEN_BAND_COLOR;
+    for(const s of spans){
+      const left = Math.max(area.left, x.getPixelForValue(s.from));
+      const right = Math.min(area.right, x.getPixelForValue(s.to));
+      if(right - left < 1) continue;
+      ctx.fillRect(left, area.top, Math.max(2, right - left), area.bottom - area.top);
     }
     ctx.restore();
   }
@@ -2054,114 +2071,87 @@ function switchChartMetric(btn){
   loadChart(true);
 }
 
-function switchChartHours(btn){
-  document.querySelectorAll('#hoursSeg button').forEach(b => b.classList.remove('active'));
+function switchChartDay(btn){
+  document.querySelectorAll('#daySeg button').forEach(b => b.classList.remove('active'));
   btn.classList.add('active');
-  chartHours = parseInt(btn.dataset.hours);
+  chartDay = btn.dataset.day;
   loadChart(true);
 }
 
-// "지금" 값 표시
+// "지금" 값 표시 (어제를 보고 있어도 지금 값)
 function renderChartNow(indoor){
   const valEl = $('chartNowVal');
   const chipEl = $('chartNowChip');
   valEl.className = 'chart-now-val';
-
-  if(chartMetric === 'compare'){
-    const inV = (indoor || {}).pm25;
-    const outV = (lastState.air || {}).pm25;
-    const part = (v, label) => `${has(v) ? fmt(v, 0) : '-'}<span class="unit">${label}</span>`;
-    valEl.innerHTML = `${part(inV, '실내')}<span class="now-sep">/</span>${part(outV, '바깥')}`;
-    setChip(chipEl, 'unknown');
-    return;
-  }
-
-  if(!indoor){ valEl.textContent = '-'; setChip(chipEl, 'unknown'); return; }
-
-  const g = extractGrade(indoor, chartMetric);
-  if(chartMetric === 'overall'){
-    valEl.textContent = gradeLabel[g];
-    valEl.classList.add('grade-text', g);
-    setChip(chipEl, 'unknown');
-  } else {
-    const v = indoor[chartMetric];
-    valEl.innerHTML = has(v) ? `${fmt(v, 0)}<span class="unit">${METRICS[chartMetric].unit}</span>` : '-';
-    setChip(chipEl, g);
-  }
+  const v = (indoor || {})[chartMetric];
+  if(!has(v)){ valEl.textContent = '-'; setChip(chipEl, 'unknown'); return; }
+  valEl.innerHTML = `${fmt(v, 0)}<span class="unit">${METRICS[chartMetric].unit}</span>`;
+  setChip(chipEl, METRICS[chartMetric].grade(v));
 }
 
-// 차트 로드
+// 차트 로드: 오늘(0시~지금) / 어제(0시~24시) + 창문 열린 구간 띠 + (미세먼지) 바깥 값 점선
 async function loadChart(animate=false){
   try {
     const metric = chartMetric;
-    const hours = chartHours;
-    const isOverall = metric === 'overall';
-    const isCompare = metric === 'compare';
-    const [res, airRes] = await Promise.all([
-      api(`/api/indoor-history?hours=${hours}`),
-      isCompare ? api(`/api/air-history?hours=${hours}`) : null,
+    const day = chartDay;
+    const m = METRICS[metric];
+    const [res, airRes, spanRes] = await Promise.all([
+      api(`/api/indoor-history?day=${day}`),
+      m.outdoor ? api(`/api/air-history?day=${day}`) : null,
+      api(`/api/window-spans?day=${day}`),
     ]);
-    // 응답 오는 사이 사용자가 다른 탭을 눌렀으면 버림
-    if(metric !== chartMetric || hours !== chartHours) return;
+    // 응답 오는 사이 사용자가 다른 버튼을 눌렀으면 버림
+    if(metric !== chartMetric || day !== chartDay) return;
 
     const logs = res.logs || [];
     const airLogs = airRes ? (airRes.logs || []) : [];
-    const m = METRICS[metric];
-    const valueKey = isCompare ? 'pm25' : metric;
-
-    $('chartDesc').textContent = m.desc || `${m.name} (${m.unit}) · 배경색은 등급 구간이에요`;
-    $('seriesLegend').hidden = !isCompare;
+    $('chartDesc').textContent = m.desc;
+    $('seriesLegend').hidden = !m.outdoor;
+    $('bucketNote').hidden = false;
+    $('bucketNote').textContent = `점 하나는 ${CHART_BUCKET_MIN}분 평균`;
+    renderChartNow(lastState.indoor);
 
     const nowMs = has(lastState.server_time) ? tsMs(lastState.server_time) : Date.now();
-    const bucketMs = (BUCKET_MIN[hours] || 0) * 60000;
-    $('bucketNote').hidden = !bucketMs;
-    $('bucketNote').textContent = `점 하나는 ${BUCKET_MIN[hours]}분 평균`;
+    const xMin = tsMs(res.start);
+    const xMax = res.end ? tsMs(res.end) : nowMs;
+    const spans = (spanRes.spans || []).map(s => ({ from: tsMs(s.start), to: s.end ? tsMs(s.end) : xMax }));
 
     if(logs.length === 0 && airLogs.length === 0){
       if(indoorChart){ indoorChart.destroy(); indoorChart = null; }
+      $('chartEmptyText').textContent = day === 'today' ? '오늘 기록이 아직 없어요' : '어제 기록이 없어요';
       $('chartEmpty').hidden = false;
-      renderChartNow(null);
       return;
     }
     $('chartEmpty').hidden = true;
 
     // 데이터: {x: 시각(ms), y: 값}
-    const rawPts = bucketMs
-      ? bucketLogs(logs, bucketMs, nowMs)
-      : logs.map(log => ({ x: tsMs(log.timestamp), indoor: log.indoor || {} }));
-    const indoorPts = rawPts.map(p => ({ ...p, y: metricValue(p.indoor, valueKey) }));
-    const outdoorPts = airLogs
-      .filter(l => has(l.pm25))
-      .map(l => ({ x: tsMs(l.timestamp), y: l.pm25 }));
-
+    const bucketMs = CHART_BUCKET_MIN * 60000;
+    const indoorPts = bucketLogs(logs, bucketMs, nowMs).map(p => ({ ...p, y: has(p.indoor[metric]) ? p.indoor[metric] : null }));
+    const outdoorPts = airLogs.filter(l => has(l[metric])).map(l => ({ x: tsMs(l.timestamp), y: l[metric] }));
     const known = [...indoorPts, ...outdoorPts].map(p => p.y).filter(has);
     const maxVal = known.length ? Math.max(...known) : 0;
 
-    // 가로축: 선택한 기간 전체 (서버 시각 기준)
-    const allX = [...indoorPts, ...outdoorPts].map(p => p.x);
-    const xMax = has(lastState.server_time) ? tsMs(lastState.server_time) : Math.max(...allX);
-    const xMin = xMax - hours * 3600 * 1000;
     // 바깥 값은 다음 측정 전까지 유지되는 계단형 → 툴팁에서 그 시각의 바깥 값 찾기
     const outdoorAt = x => {
       let v = null;
       for(const p of outdoorPts){ if(p.x <= x) v = p.y; else break; }
       return v;
     };
+    const isOpenAt = x => spans.some(s => s.from <= x && x <= s.to);
 
     const datasets = [{
-      label: isCompare ? '실내' : m.name,
+      label: '실내',
       data: indoorPts,
       borderColor: '#3182F6',
       pointBackgroundColor: '#3182F6',
       borderWidth: 2.5,
-      tension: isOverall ? 0 : 0.3,
-      stepped: isOverall ? 'before' : false,
-      pointRadius: (bucketMs || indoorPts.length <= 12) ? 3 : 0,
+      tension: 0.3,
+      pointRadius: indoorPts.length <= 24 ? 3 : 0,
       pointHoverRadius: 5,
-      spanGaps: bucketMs ? bucketMs * 1.5 : INDOOR_GAP_MS,   // 구간이 통째로 비면 선을 끊음
+      spanGaps: bucketMs * 1.5,          // 구간이 통째로 비면 선을 끊음
       fill: false,
     }];
-    if(isCompare){
+    if(m.outdoor){
       datasets.push({
         label: '바깥',
         data: outdoorPts,
@@ -2177,28 +2167,15 @@ async function loadChart(animate=false){
       });
     }
 
-    const yScale = isOverall
-      ? {
-          min: -0.5, max: 3.5,
-          afterBuildTicks: axis => { axis.ticks = [0, 1, 2, 3].map(v => ({ value: v })); },
-          ticks: { callback: v => gradeLabel[GRADES[v]] || '', font: { size: 11 } },
-          grid: { display: false },
-          border: { display: false },
-        }
-      : {
-          min: 0,
-          suggestedMax: Math.max(maxVal * 1.2, m.cuts[0] * 1.5),
-          ticks: { maxTicksLimit: 5, font: { size: 11 } },
-          grid: { color: 'rgba(128, 128, 128, .12)' },
-          border: { display: false },
-        };
+    // 눈금: 보여 주는 기간이 6시간 이하면 1시간, 그보다 길면 3시간 간격 (정각)
+    const tickStep = (xMax - xMin <= 6 * 3600 * 1000 ? 60 : 180) * 60000;
 
     if(indoorChart) indoorChart.destroy();
 
     indoorChart = new Chart($('indoorChart').getContext('2d'), {
       type: 'line',
       data: { datasets },
-      plugins: [gradeBands],
+      plugins: [gradeBands, openBands],
       options: {
         responsive: true,
         maintainAspectRatio: false,
@@ -2206,11 +2183,8 @@ async function loadChart(animate=false){
         interaction: { mode: 'nearest', axis: 'x', intersect: false },
         plugins: {
           legend: { display: false },
-          gradeBands: {
-            bands: isOverall
-              ? GRADES.map((g, k) => ({ from: k - 0.5, to: k + 0.5, grade: g }))
-              : cutsToBands(m.cuts),
-          },
+          gradeBands: { bands: cutsToBands(m.cuts) },
+          openBands: { spans },
           tooltip: {
             backgroundColor: 'rgba(25, 31, 40, .92)',
             padding: 12,
@@ -2222,53 +2196,48 @@ async function loadChart(animate=false){
                 const raw = items[0].raw;
                 return has(raw.from) ? `${hhmm(raw.from)}~${hhmm(raw.x)} 평균` : hhmm(items[0].parsed.x);
               },
-              label: function(ctx){
-                if(isCompare){
-                  const v = ctx.parsed.y;
-                  if(ctx.datasetIndex === 1) return `바깥 ${v}㎍/㎥ · ${gradeLabel[gradePM25(v)]}`;
+              label: ctx => {
+                const v = ctx.parsed.y;
+                const who = m.outdoor ? (ctx.datasetIndex === 1 ? '바깥 ' : '실내 ') : '';
+                const lines = [`${who}${m.name} ${v}${m.unit} · ${gradeLabel[m.grade(v)]}`];
+                if(m.outdoor && ctx.datasetIndex === 0){
                   const out = outdoorAt(ctx.parsed.x);
-                  const lines = [`실내 ${v}㎍/㎥ · ${gradeLabel[gradePM25(v)]}`];
-                  if(has(out)) lines.push(`바깥 ${out}㎍/㎥`);
-                  return lines;
+                  if(has(out)) lines.push(`바깥 ${out}${m.unit}`);
                 }
-                const indoor = ctx.raw.indoor || {};
-                if(isOverall){
-                  const lines = [`종합 ${gradeLabel[GRADES[ctx.parsed.y]] || '-'}`];
-                  if(has(indoor.pm25)) lines.push(`초미세먼지 ${indoor.pm25}㎍/㎥`);
-                  if(has(indoor.pm10)) lines.push(`미세먼지 ${indoor.pm10}㎍/㎥`);
-                  if(has(indoor.co2))  lines.push(`이산화탄소 ${indoor.co2}ppm`);
-                  return lines;
-                }
-                return `${m.name} ${ctx.parsed.y}${m.unit} · ${gradeLabel[m.grade(ctx.parsed.y)]}`;
+                if(isOpenAt(ctx.parsed.x)) lines.push('창문 열림');
+                return lines;
               }
             }
           }
         },
         scales: {
-          y: yScale,
+          y: {
+            min: 0,
+            suggestedMax: Math.max(maxVal * 1.2, m.cuts[0] * 1.5),
+            ticks: { maxTicksLimit: 5, font: { size: 11 } },
+            grid: { color: 'rgba(128, 128, 128, .12)' },
+            border: { display: false },
+          },
           x: {
             type: 'linear',
             min: xMin,
             max: xMax,
             grid: { display: false },
             border: { display: false },
-            // 눈금을 10분/1시간/4시간 단위 정각에 맞춤 (브라우저 시간대 기준)
+            // 눈금을 정각에 맞춤 (브라우저 시간대 기준)
             afterBuildTicks: axis => {
-              const step = TICK_STEP_MIN[hours] * 60000;
               const off = new Date().getTimezoneOffset() * 60000;
               const ticks = [];
-              for(let t = Math.ceil((axis.min - off) / step) * step + off; t <= axis.max; t += step){
+              for(let t = Math.ceil((axis.min - off) / tickStep) * tickStep + off; t <= axis.max; t += tickStep){
                 ticks.push({ value: t });
               }
               axis.ticks = ticks;
             },
-            ticks: { maxRotation: 0, autoSkip: true, maxTicksLimit: 7, callback: v => hhmm(v), font: { size: 11 } },
+            ticks: { maxRotation: 0, autoSkip: true, maxTicksLimit: 9, callback: v => hhmm(v), font: { size: 11 } },
           }
         }
       }
     });
-
-    renderChartNow(logs.length ? (logs[logs.length - 1].indoor || {}) : null);
 
   } catch(e){
     console.error('차트 로드 실패:', e);

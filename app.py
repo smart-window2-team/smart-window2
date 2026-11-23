@@ -958,23 +958,69 @@ async def receive_sensors(data: SensorData):
 
 
 # 히스토리 조회 (DB 에서 필요한 기간만 꺼냄)
+def history_range(hours, day):
+    """기록 조회 범위 (시작, 끝). day 가 있으면 그날 0시~다음 날 0시(오늘은 지금까지), 없으면 최근 hours 시간"""
+    now = now_local()
+    if day is None:
+        return now - timedelta(hours=hours), None
+    today = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    return (today, None) if day == "today" else (today - timedelta(days=1), today)
+
+
+def range_info(start, end):
+    return {"start": start.strftime(db.TS_FORMAT), "end": end.strftime(db.TS_FORMAT) if end else None}
+
+
 @app.get("/api/indoor-history")
-async def get_indoor_history(hours: int = 1):
+async def get_indoor_history(hours: int = 1, day: Optional[Literal["today", "yesterday"]] = None):
     """
     실내 센서 히스토리 조회.
-    hours: 몇 시간 전까지 (1/6/24)
+    hours: 최근 몇 시간 (요약 화면은 1) / day: today(오늘 0시~지금), yesterday(어제 하루) — 추이 차트용
     """
-    since = now_local() - timedelta(hours=hours)
-    logs = _db_safe("실내 기록 조회", db.get_indoor_logs, since) or []
-    return {"logs": logs, "hours": hours}
+    start, end = history_range(hours, day)
+    logs = _db_safe("실내 기록 조회", db.get_indoor_logs, start, end) or []
+    return {"logs": logs, "hours": hours, **range_info(start, end)}
 
 
 @app.get("/api/air-history")
-async def get_air_history(hours: int = 1):
-    """바깥 대기질 히스토리 - 실내/바깥 비교 차트용"""
-    since = now_local() - timedelta(hours=hours)
-    logs = _db_safe("바깥 기록 조회", db.get_air_logs, since) or []
-    return {"logs": logs, "hours": hours}
+async def get_air_history(hours: int = 1, day: Optional[Literal["today", "yesterday"]] = None):
+    """바깥 대기질 히스토리 - 실내/바깥 비교 차트용 (hours·day 는 실내 기록과 같음)"""
+    start, end = history_range(hours, day)
+    logs = _db_safe("바깥 기록 조회", db.get_air_logs, start, end) or []
+    return {"logs": logs, "hours": hours, **range_info(start, end)}
+
+
+def window_spans(start, end):
+    """start~end 사이에 창문이 열려 있던 구간 [(열린 시각, 닫힌 시각 또는 None=지금도 열림)]
+    그 전에 열려서 start 를 넘긴 구간도 잡으려고 하루 앞부터 읽고 범위에 맞게 자름"""
+    spans, opened = [], None
+    for ts, status in db.get_window_events(start - timedelta(days=1)):
+        if end is not None and ts >= end:
+            break
+        if status != "closed":
+            opened = opened or ts
+        elif opened is not None:
+            spans.append((opened, ts))
+            opened = None
+    if opened is not None:
+        if end is not None:
+            spans.append((opened, end))              # 어제: 자정을 넘겨 열려 있었음
+        else:
+            with state_lock:
+                still_open = state["window_status"] == "open"
+            if still_open:
+                spans.append((opened, None))         # 오늘: 지금도 열려 있음 (닫힘 기록이 없는데 닫혀 있으면 재시작 흔적 → 버림)
+    return [(max(s, start), e if e is None or end is None else min(e, end))
+            for s, e in spans if e is None or e > start]
+
+
+@app.get("/api/window-spans")
+async def get_window_spans(day: Literal["today", "yesterday"] = "today"):
+    """그날 창문이 열려 있던 구간 - 추이 차트에 띠로 표시"""
+    start, end = history_range(0, day)
+    spans = _db_safe("창문 기록 조회", window_spans, start, end) or []
+    return {"spans": [{"start": s.strftime(db.TS_FORMAT), "end": e.strftime(db.TS_FORMAT) if e else None}
+                      for s, e in spans], **range_info(start, end)}
 
 
 VENT_MIN_SECONDS = 180                    # 이보다 짧게 열린 건 환기 효과를 계산하지 않음

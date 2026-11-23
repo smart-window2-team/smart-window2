@@ -157,21 +157,26 @@ def add_event(ts, kind, reason, source, window_status=None):
 
 
 # ── 조회 (예전 JSON 방식과 같은 모양으로 돌려줌 → 화면 코드는 그대로) ──────
-def get_indoor_logs(since):
-    """since 이후의 실내 기록, 시간순. [{"timestamp": "...", "indoor": {...}}]"""
+def get_indoor_logs(since, until=None):
+    """since 이후(until 이 있으면 그 전까지)의 실내 기록, 시간순. [{"timestamp": "...", "indoor": {...}}]"""
     with Session(engine) as s:
-        rows = s.scalars(select(IndoorLog).where(IndoorLog.ts >= since).order_by(IndoorLog.ts)).all()
+        q = select(IndoorLog).where(IndoorLog.ts >= since)
+        if until is not None:
+            q = q.where(IndoorLog.ts < until)
+        rows = s.scalars(q.order_by(IndoorLog.ts)).all()
         return [{
             "timestamp": r.ts.strftime(TS_FORMAT),
             "indoor": {k: getattr(r, k) for k in INDOOR_FIELDS if getattr(r, k) is not None},
         } for r in rows]
 
 
-def get_air_logs(since):
-    """since 이후의 바깥 미세먼지 기록, 시간순. [{"timestamp", "pm25", "pm10"}]"""
+def get_air_logs(since, until=None):
+    """since 이후(until 이 있으면 그 전까지)의 바깥 미세먼지 기록, 시간순. [{"timestamp", "pm25", "pm10"}]"""
     with Session(engine) as s:
-        rows = s.execute(select(AirLog.ts, AirLog.pm25, AirLog.pm10)
-                         .where(AirLog.ts >= since).order_by(AirLog.ts)).all()
+        q = select(AirLog.ts, AirLog.pm25, AirLog.pm10).where(AirLog.ts >= since)
+        if until is not None:
+            q = q.where(AirLog.ts < until)
+        rows = s.execute(q.order_by(AirLog.ts)).all()
         return [{"timestamp": ts.strftime(TS_FORMAT), "pm25": pm25, "pm10": pm10} for ts, pm25, pm10 in rows]
 
 
