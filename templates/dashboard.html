@@ -284,8 +284,13 @@
     <!-- 4. 요약 (PC에서는 차트 오른쪽) -->
     <section class="page page-summary">
       <div class="card summary-card">
-        <h3 class="card-title">최근 1시간 요약</h3>
-        <p class="card-desc">지난 1시간 동안 실내 공기가 어땠는지 보여드려요</p>
+        <div class="sum-top">
+          <h3 class="card-title">하루 요약</h3>
+          <div class="segmented segmented-sm" id="sumDaySeg">
+            <button class="active" data-day="today" onclick="switchSummaryDay(this)">오늘</button>
+            <button data-day="yesterday" onclick="switchSummaryDay(this)">어제</button>
+          </div>
+        </div>
         <div id="summaryBody"></div>
       </div>
     </section>
@@ -1943,121 +1948,114 @@ function bucketLogs(logs, bucketMs, nowMs){
   });
 }
 
-// 요약 페이지 (차트에서 고른 항목·기간과 상관없이 전체 항목)
-// - 환기 효과: 마지막으로 창문이 열렸다 닫힌 구간의 전후 비교 (서버가 계산)
-// - 나머지: 최근 1시간의 1분 기록으로 계산
+// ════════════════════════════════════════════════════
+// 하루 요약 (오늘 / 어제): ① 한 줄 결론 → ② 오늘의 환기 → ③ 실내 공기 등급 → ④ 가장 높았던 값
+// ════════════════════════════════════════════════════
 const SUMMARY_KEYS = ['co2', 'pm25', 'pm10'];
+let summaryDay = 'today';
 
-// 환기 효과 상자
-function ventBoxHtml(vent){
-  if(!vent){
-    return `<div class="vent-box">
-      <div class="vent-when">환기 효과</div>
-      <div class="vent-headline">아직 환기 기록이 없어요</div>
-      <div class="vent-note">창문이 열렸다 닫히면 얼마나 좋아졌는지 보여드려요</div>
-    </div>`;
-  }
-  const today = (lastState.server_time || '').slice(0, 10);
-  const day = ts => (today && ts.slice(0, 10) !== today) ? '어제 ' : '';
-  const at = ts => day(ts) + hhmm(tsMs(ts));
-  const when = vent.ongoing
-    ? `지금 환기 중 · ${at(vent.start)}부터 (${vent.minutes}분째)`
-    : `마지막 환기 · ${at(vent.start)} ~ ${hhmm(tsMs(vent.end))} (${vent.minutes}분)`;
+const VENT_KIND = { schedule:'정기 환기', co2:'실내 CO₂ 높음', indoor_pm:'실내 공기 탁함', manual:'직접 열기', auto:'자동 환기' };
+const CLOSED_BY = { rain:'비로 일찍 닫힘', wind:'강풍으로 일찍 닫힘', outdoor:'바깥 공기가 나빠져 닫힘', early:'충분히 환기돼 일찍 닫힘' };
+const SHORT_NAME = { co2:'CO₂', pm25:'초미세먼지', pm10:'미세먼지' };
 
-  const items = SUMMARY_KEYS
-    .map(key => ({ m: METRICS[key], a: vent.before[key], b: vent.after[key] }))
-    .filter(it => has(it.a) && has(it.b))
-    .map(it => ({ ...it, pct: it.a > 0 ? Math.round((it.b - it.a) / it.a * 100) : 0 }));
-
-  // 한 줄 요약: 가장 많이 줄어든 항목 → 없으면 가장 많이 늘어난 항목 (나빠진 것도 그대로 알림)
-  const best = items.reduce((x, it) => (!x || it.pct < x.pct) ? it : x, null);
-  const worst = items.reduce((x, it) => (!x || it.pct > x.pct) ? it : x, null);
-  let headline = vent.ongoing ? '아직 큰 변화가 없어요' : '환기 전후로 큰 변화가 없었어요';
-  if(best && best.pct <= -5){
-    headline = `${best.m.name}가 ${-best.pct}% ${vent.ongoing ? '줄고 있어요' : '줄었어요'}`;
-  } else if(worst && worst.pct >= 5){
-    headline = vent.ongoing ? `${worst.m.name}가 늘고 있어요` : `환기했지만 ${worst.m.name}가 늘었어요`;
-  }
-
-  const num = v => Math.round(v).toLocaleString();
-  const delta = pct => pct <= -1 ? `<span class="vent-delta down">▼${-pct}%</span>`
-                     : pct >= 1  ? `<span class="vent-delta up">▲${pct}%</span>`
-                     :             `<span class="vent-delta">-</span>`;
-  const rows = items.map(it => `
-      <div class="vent-row">
-        <span class="vent-name">${it.m.name}</span>
-        <span class="vent-vals">${num(it.a)} → ${num(it.b)}<span class="unit">${it.m.unit}</span></span>
-        ${delta(it.pct)}
-      </div>`).join('');
-
-  return `<div class="vent-box">
-      <div class="vent-when">${when}</div>
-      <div class="vent-headline">${headline}</div>${rows}
-    </div>`;
+function switchSummaryDay(btn){
+  document.querySelectorAll('#sumDaySeg button').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  summaryDay = btn.dataset.day;
+  loadSummary();
 }
 
-function renderSummary(logs, vent, nowMs){
+// 환기 효과: 가장 많이 줄어든 항목 하나 (5% 이상 변했을 때만)
+function effectText(effect){
+  const items = SUMMARY_KEYS.filter(k => effect && effect[k]).map(k => ({ k, pct: effect[k].pct }));
+  if(!items.length) return '';
+  const best = items.reduce((a, b) => b.pct < a.pct ? b : a);
+  if(best.pct <= -5) return `<span class="vent-delta down">${SHORT_NAME[best.k]} ▼${-best.pct}%</span>`;
+  const worst = items.reduce((a, b) => b.pct > a.pct ? b : a);
+  if(worst.pct >= 5) return `<span class="vent-delta up">${SHORT_NAME[worst.k]} ▲${worst.pct}%</span>`;
+  return '<span class="vent-delta">변화 적음</span>';
+}
+
+function renderSummary(logs, sum, day){
   const box = $('summaryBody');
+  const dayWord = day === 'today' ? '오늘' : '어제';
   const rows = logs.map(l => ({ t: tsMs(l.timestamp), indoor: l.indoor || {} }));
   const series = key => rows.map(r => ({ t: r.t, v: metricValue(r.indoor, key) })).filter(p => has(p.v));
   const overall = series('overall');
-  const empty = '<div class="summary-empty">실내 센서 기록이 쌓이면<br>요약을 보여드릴게요</div>';
-  if(!overall.length){
-    box.innerHTML = vent ? ventBoxHtml(vent) + empty : empty;
-    return;
-  }
+  const vents = sum.vents || [];
+  const totalMin = vents.reduce((n, v) => n + v.minutes, 0);
 
-  let html = ventBoxHtml(vent);
-
-  // 등급 비율 (종합 등급 기준. 기록이 1분에 하나 → 개수 = 분)
+  // ① 한 줄 결론
   const counts = GRADES.map((g, i) => overall.filter(p => p.v === i).length);
-  const share = counts.map(c => Math.round(c / overall.length * 100));
-  html += `
+  const badMin = counts[2] + counts[3];
+  const goodShare = overall.length ? counts[0] / overall.length : 0;
+  const airLine = !overall.length ? `${dayWord} 실내 센서 기록이 없어요`
+    : (badMin >= 60 || badMin / overall.length >= 0.2) ? `${dayWord} 실내 공기가 나빴던 시간이 길었어요`
+    : goodShare >= 0.7 ? `${dayWord} 실내 공기는 대체로 좋았어요`
+    : `${dayWord} 실내 공기는 보통이었어요`;
+  const ventLine = vents.length ? `창문을 ${vents.length}번 열어 총 ${totalMin}분 환기했어요`
+    : day === 'today' ? '아직 환기하지 않았어요' : '환기하지 않았어요';
+  let html = `<div class="sum-verdict"><p class="sum-title">${airLine}</p><p class="sum-sub">${ventLine}</p></div>`;
+
+  // ② 환기 기록: 연 회차 + 건너뛴 정기 환기 + 남은 정기 환기를 시간순으로
+  const items = [
+    ...vents.map(v => ({
+      t: tsMs(v.start), time: hhmm(tsMs(v.start)), label: VENT_KIND[v.kind] || '환기',
+      note: !v.end ? '지금 환기 중' : (CLOSED_BY[v.closed_by] || ''),
+      right: `<span class="ev-min">${v.minutes}분</span>${effectText(v.effect)}`, cls: v.end ? '' : 'live',
+    })),
+    ...(sum.skipped || []).map(s => {
+      const m = s.reason.match(/(\d{2}:\d{2})/);
+      return { t: tsMs(s.at), time: m ? m[1] : hhmm(tsMs(s.at)), label: '정기 환기',
+               note: s.reason.replace(/\s*\d{2}:\d{2}\s*정기 환기(를|는)?\s*/, ' ').replace('건너뛰었어요', '건너뜀').trim(),
+               right: '', cls: 'skipped' };
+    }),
+    ...(sum.upcoming || []).map(at => ({ t: Infinity, time: at, label: '정기 환기', note: '예정', right: '', cls: 'upcoming' })),
+  ].sort((a, b) => a.t - b.t || a.time.localeCompare(b.time));
+  html += `<div class="sum-block"><div class="sum-head"><span>${dayWord}의 환기</span></div>`;
+  html += items.length
+    ? `<ul class="vent-list">${items.map(it => `
+        <li class="vent-item ${it.cls}">
+          <span class="vi-time">${it.time}</span>
+          <span class="vi-text"><span class="vi-label">${it.label}</span>${it.note ? `<span class="vi-note">${escapeHTML(it.note)}</span>` : ''}</span>
+          <span class="vi-right">${it.right}</span>
+        </li>`).join('')}</ul>`
+    : `<p class="sum-none">환기 기록이 없어요</p>`;
+  html += `</div>`;
+
+  // ③ 실내 공기 등급 (종합 등급, 기록 1개 = 1분)
+  if(overall.length){
+    const share = counts.map(c => Math.round(c / overall.length * 100));
+    const durText = min => min >= 60 ? `약 ${Math.floor(min / 60)}시간 ${min % 60}분` : `약 ${min}분`;
+    html += `
     <div class="sum-block">
-      <div class="sum-head"><span>등급 비율</span></div>
+      <div class="sum-head"><span>실내 공기 등급</span><span class="sum-trend">나쁨 이상 ${badMin ? durText(badMin) : '없음'}</span></div>
       <div class="ratio-bar">${GRADES.map((g, i) => counts[i] ? `<i class="${g}" style="flex:${counts[i]}"></i>` : '').join('')}</div>
       <div class="ratio-legend">${GRADES.map((g, i) => counts[i]
         ? `<span><i class="dot ${g}"></i>${gradeLabel[g]} ${share[i]}%</span>` : '').join('')}</div>
     </div>`;
 
-  // 지금 흐름: 최근 10분 평균 vs 그 전 10분 평균 (센서가 5분 넘게 조용하면 표시 안 함)
-  const mean = arr => arr.reduce((s, p) => s + p.v, 0) / arr.length;
-  const trendOf = (pts, m) => {
-    const end = pts[pts.length - 1].t;
-    const recent = pts.filter(p => p.t > end - 600000);
-    const before = pts.filter(p => p.t > end - 1200000 && p.t <= end - 600000);
-    if(nowMs - end > INDOOR_GAP_MS || recent.length < 3 || before.length < 3) return '';
-    const diff = mean(recent) - mean(before);
-    const edge = Math.max(mean(before) * 0.05, m.cuts[0] * 0.05);
-    return diff > edge ? '오르는 중 ↑' : diff < -edge ? '내려가는 중 ↓' : '비슷해요';
-  };
-
-  for(const key of SUMMARY_KEYS){
-    const m = METRICS[key];
-    const pts = series(key);
-    if(!pts.length) continue;
-    const peak = pts.reduce((a, p) => p.v > a.v ? p : a);
-    html += `
-    <div class="sum-block">
-      <div class="sum-head"><span>${m.name}</span><span class="sum-trend">${trendOf(pts, m)}</span></div>
-      <div class="sum-peak">최고 <b class="grade-text ${m.grade(peak.v)}">${Math.round(peak.v).toLocaleString()}</b><span class="unit">${m.unit}</span> · ${hhmm(peak.t)}</div>
-    </div>`;
+    // ④ 가장 높았던 값 (참고)
+    const peaks = SUMMARY_KEYS.map(key => {
+      const pts = series(key);
+      if(!pts.length) return '';
+      const m = METRICS[key], peak = pts.reduce((a, p) => p.v > a.v ? p : a);
+      return `<div class="peak-row"><span>${m.name}</span><span><b class="grade-text ${m.grade(peak.v)}">${Math.round(peak.v).toLocaleString()}</b><span class="unit">${m.unit}</span> · ${hhmm(peak.t)}</span></div>`;
+    }).join('');
+    html += `<div class="sum-block sum-peaks"><div class="sum-head"><span>가장 높았던 값</span></div>${peaks}</div>`;
   }
-
-  const badMin = overall.filter(p => p.v >= 2).length;
-  const durText = min => min >= 60 ? `약 ${Math.floor(min / 60)}시간 ${min % 60}분` : `약 ${min}분`;
-  html += `<div class="row"><span class="row-label">나쁨 이상이었던 시간</span><span class="row-value">${badMin ? durText(badMin) : '없음'}</span></div>`;
   box.innerHTML = html;
 }
 
 async function loadSummary(){
   try {
-    const [res, ventRes] = await Promise.all([
-      api('/api/indoor-history?hours=1'),
-      api('/api/vent-effect'),
+    const day = summaryDay;
+    const [res, sum] = await Promise.all([
+      api(`/api/indoor-history?day=${day}`),
+      api(`/api/day-summary?day=${day}`),
     ]);
-    const nowMs = has(lastState.server_time) ? tsMs(lastState.server_time) : Date.now();
-    renderSummary(res.logs || [], ventRes.vent || null, nowMs);
+    if(day !== summaryDay) return;           // 응답 오는 사이 다른 날을 눌렀으면 버림
+    renderSummary(res.logs || [], sum || {}, day);
   } catch(e){
     console.error('요약 로드 실패:', e);
   }

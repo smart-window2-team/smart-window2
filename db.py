@@ -197,6 +197,16 @@ def get_window_events(since):
         return [(ts, status) for ts, status in rows]
 
 
+def get_day_events(since, until=None):
+    """since~until 사이 창문·정기 환기 기록, 시간순. [(시각, 종류, 창문 상태, 이유)]"""
+    with Session(engine) as s:
+        q = select(Event.ts, Event.kind, Event.window_status, Event.reason).where(
+            Event.ts >= since, Event.kind.in_(("window", "schedule")))
+        if until is not None:
+            q = q.where(Event.ts < until)
+        return [tuple(r) for r in s.execute(q.order_by(Event.ts, Event.id)).all()]
+
+
 def get_indoor_avg(start, end):
     """start~end 사이 실내 기록의 평균. 기록이 없으면 None"""
     with Session(engine) as s:

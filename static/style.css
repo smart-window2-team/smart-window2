@@ -1176,33 +1176,45 @@ body.manual .dock { transform: none; }
   line-height: 1.6;
 }
 
-/* 환기 효과 상자 */
-.vent-box {
-  padding: 16px;
-  border-radius: var(--radius-sm);
-  background: var(--blue-soft);
-}
-.vent-when { color: var(--sub); font-size: 0.8rem; font-weight: 600; }
-.vent-headline {
-  margin: 6px 0 4px;
-  font-size: 1.1rem;
-  font-weight: 700;
-  letter-spacing: -0.02em;
-}
-.vent-note { color: var(--sub); font-size: 0.85rem; line-height: 1.5; }
-.vent-row {
+.sum-top { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+.sum-verdict { padding: 16px; border-radius: var(--radius-sm); background: var(--blue-soft); }
+.sum-title { margin: 0; font-size: 1.1rem; font-weight: 700; letter-spacing: -0.02em; line-height: 1.4; }
+.sum-sub { margin: 4px 0 0; color: var(--sub); font-size: 0.9rem; }
+.sum-none { margin: 8px 0 0; color: var(--muted); font-size: 0.9rem; }
+
+/* 오늘의 환기 목록 */
+.vent-list { list-style: none; margin: 8px 0 0; padding: 0; }
+.vent-item {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto 46px;
-  align-items: baseline;
-  gap: 8px;
-  margin-top: 8px;
-  font-size: 0.9rem;
+  grid-template-columns: 44px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 0;
 }
-.vent-name { color: var(--sub); }
-.vent-vals { font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; }
-.vent-delta { text-align: right; font-size: 0.85rem; font-weight: 700; color: var(--muted); font-variant-numeric: tabular-nums; }
+.vent-item + .vent-item { border-top: 1px dashed var(--line); }
+.vi-time { font-weight: 700; font-variant-numeric: tabular-nums; }
+.vi-text { display: grid; gap: 1px; min-width: 0; }
+.vi-label { font-size: 0.92rem; font-weight: 600; }
+.vi-note { color: var(--muted); font-size: 0.78rem; }
+.vi-right { display: grid; justify-items: end; gap: 1px; }
+.ev-min { font-size: 0.85rem; font-weight: 600; font-variant-numeric: tabular-nums; }
+.vent-item.live .vi-note { color: var(--blue); font-weight: 600; }
+.vent-item.skipped .vi-time, .vent-item.skipped .vi-label { color: var(--muted); text-decoration: line-through; }
+.vent-item.upcoming .vi-time, .vent-item.upcoming .vi-label { color: var(--muted); }
+.vent-delta { font-size: 0.8rem; font-weight: 700; color: var(--muted); font-variant-numeric: tabular-nums; }
 .vent-delta.down { color: var(--good); }
 .vent-delta.up   { color: var(--bad); }
+
+.peak-row {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 6px;
+  color: var(--sub);
+  font-size: 0.88rem;
+  font-variant-numeric: tabular-nums;
+}
+.peak-row b { font-size: 1rem; }
+.sum-block.sum-peaks { border-bottom: 0; }
 
 .sum-block { padding: 14px 0; border-bottom: 1px solid var(--line); }
 .sum-head {
@@ -1213,9 +1225,6 @@ body.manual .dock { transform: none; }
   font-weight: 700;
 }
 .sum-trend { color: var(--sub); font-size: 0.85rem; font-weight: 600; }
-.sum-peak { margin-top: 4px; color: var(--sub); font-size: 0.9rem; font-variant-numeric: tabular-nums; }
-.sum-peak b { font-size: 1.05rem; }
-#summaryBody > .row { padding-bottom: 0; }
 
 /* 등급 비율 막대 */
 .ratio-bar {

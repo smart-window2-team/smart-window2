@@ -990,28 +990,38 @@ async def get_air_history(hours: int = 1, day: Optional[Literal["today", "yester
     return {"logs": logs, "hours": hours, **range_info(start, end)}
 
 
-def window_spans(start, end):
-    """start~end 사이에 창문이 열려 있던 구간 [(열린 시각, 닫힌 시각 또는 None=지금도 열림)]
+def day_vents(start, end):
+    """start~end 사이에 창문이 열려 있던 구간 [{"start", "end"(None=지금도 열림), "open_reason", "close_reason"}]
     그 전에 열려서 start 를 넘긴 구간도 잡으려고 하루 앞부터 읽고 범위에 맞게 자름"""
-    spans, opened = [], None
-    for ts, status in db.get_window_events(start - timedelta(days=1)):
-        if end is not None and ts >= end:
-            break
+    vents, cur = [], None
+    for ts, kind, status, reason in db.get_day_events(start - timedelta(days=1), end):
+        if kind != "window" or status is None:
+            continue
         if status != "closed":
-            opened = opened or ts
-        elif opened is not None:
-            spans.append((opened, ts))
-            opened = None
-    if opened is not None:
+            cur = cur or {"start": ts, "open_reason": reason}
+        elif cur is not None:
+            vents.append({**cur, "end": ts, "close_reason": reason})
+            cur = None
+    if cur is not None:
         if end is not None:
-            spans.append((opened, end))              # 어제: 자정을 넘겨 열려 있었음
+            vents.append({**cur, "end": end, "close_reason": None})      # 어제: 자정을 넘겨 열려 있었음
         else:
             with state_lock:
                 still_open = state["window_status"] == "open"
             if still_open:
-                spans.append((opened, None))         # 오늘: 지금도 열려 있음 (닫힘 기록이 없는데 닫혀 있으면 재시작 흔적 → 버림)
-    return [(max(s, start), e if e is None or end is None else min(e, end))
-            for s, e in spans if e is None or e > start]
+                vents.append({**cur, "end": None, "close_reason": None})  # 오늘: 지금도 열려 있음 (닫힘 기록 없이 닫혀 있으면 재시작 흔적 → 버림)
+    result = []
+    for v in vents:
+        if v["end"] is not None and v["end"] <= start:
+            continue
+        result.append({**v, "start": max(v["start"], start),
+                       "end": v["end"] if v["end"] is None or end is None else min(v["end"], end)})
+    return result
+
+
+def window_spans(start, end):
+    """start~end 사이에 창문이 열려 있던 구간 [(열린 시각, 닫힌 시각 또는 None=지금도 열림)]"""
+    return [(v["start"], v["end"]) for v in day_vents(start, end)]
 
 
 @app.get("/api/window-spans")
@@ -1061,6 +1071,75 @@ def find_last_vent():
             "after": after,
         }
     return None
+
+
+# ── 하루 요약 (요약 화면) ──────────────────────────────────────────────────
+def open_kind(reason):
+    """창문이 열린 이유 → schedule / co2 / indoor_pm / manual / auto"""
+    reason = reason or ""
+    if "정기 환기" in reason:
+        return "schedule"
+    if "CO₂" in reason:
+        return "co2"
+    if "실내 " in reason:
+        return "indoor_pm"
+    if "직접" in reason:
+        return "manual"
+    return "auto"
+
+
+def close_kind(reason):
+    """창문이 닫힌 이유 → rain / wind / outdoor / early / time / manual / timer / None"""
+    reason = reason or ""
+    for word, kind in (("강수", "rain"), ("강풍", "wind"), ("대기질", "outdoor"), ("바깥", "outdoor"),
+                       ("충분히", "early"), ("환기 끝", "time"), ("직접", "manual"), ("타이머", "timer")):
+        if word in reason:
+            return kind
+    return None
+
+
+def vent_effect(start, stop):
+    """환기 전후 실내 평균 비교 {항목: {"before", "after", "pct"}} (센서 기록이 없으면 빈 dict)"""
+    pad = timedelta(seconds=30)
+    before = db.get_indoor_avg(start - VENT_SAMPLE, start + pad)
+    after = db.get_indoor_avg(stop - VENT_SAMPLE, stop + pad)
+    if not before or not after:
+        return {}
+    return {k: {"before": before[k], "after": after[k],
+                "pct": round((after[k] - before[k]) / before[k] * 100) if before[k] else 0}
+            for k in ("co2", "pm25", "pm10") if before.get(k) is not None and after.get(k) is not None}
+
+
+def day_summary(day):
+    start, end = history_range(0, day)
+    now = now_local()
+    vents = []
+    for v in day_vents(start, end):
+        stop = v["end"] or now
+        seconds = (stop - v["start"]).total_seconds()
+        vents.append({
+            "start": v["start"].strftime(db.TS_FORMAT),
+            "end": v["end"].strftime(db.TS_FORMAT) if v["end"] else None,
+            "minutes": int(seconds // 60),
+            "kind": open_kind(v["open_reason"]),
+            "closed_by": close_kind(v["close_reason"]),
+            "effect": vent_effect(v["start"], stop) if seconds >= VENT_MIN_SECONDS else {},
+        })
+    skipped = [{"at": ts.strftime(db.TS_FORMAT), "reason": reason}
+               for ts, kind, status, reason in db.get_day_events(start, end)
+               if kind == "schedule" and "건너뛰" in (reason or "")]
+    upcoming = []
+    if day == "today" and not VENT_CYCLE_TEST:
+        with state_lock:
+            done = state.get("slot_done")
+        upcoming = [s.strftime("%H:%M") for s in _slot_times(now) if s > now and slot_key(s) != done]
+    return {"vents": vents, "skipped": skipped, "upcoming": upcoming, **range_info(start, end)}
+
+
+@app.get("/api/day-summary")
+async def get_day_summary(day: Literal["today", "yesterday"] = "today"):
+    """그날 환기 기록(이유·시간·효과), 건너뛴 정기 환기, 남은 정기 환기 — 요약 화면용"""
+    return _db_safe("하루 요약 조회", day_summary, day) or {"vents": [], "skipped": [], "upcoming": []}
 
 
 @app.get("/api/vent-effect")
