@@ -4,6 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <title>스마트 창문</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='18' fill='%233182F6'/%3E%3Crect x='25' y='13' width='27' height='38' rx='5' fill='%23fff' fill-opacity='.18' stroke='%23fff' stroke-width='3.5'/%3E%3Cpath d='M38.5 13v38' stroke='%23fff' stroke-width='3.5'/%3E%3Cpath d='M9 26h9a4 4 0 1 0-4-4' fill='none' stroke='%23CDE4FF' stroke-width='3.5' stroke-linecap='round'/%3E%3Cpath d='M9 34h11' fill='none' stroke='%23CDE4FF' stroke-width='3.5' stroke-linecap='round'/%3E%3Cpath d='M9 42h7a4 4 0 1 1-4 4' fill='none' stroke='%23CDE4FF' stroke-width='3.5' stroke-linecap='round'/%3E%3C/svg%3E" />
   <!-- Pretendard (한글 폰트) -->
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css" />
   <!-- 테마: 저장된 선택 > 폰/PC 설정 순서. CSS보다 먼저 정해서 화면이 번쩍이지 않게 -->
@@ -45,6 +46,15 @@
     <symbol id="i-minus" viewBox="0 0 24 24"><path d="M6 12h12"/></symbol>
     <symbol id="i-up" viewBox="0 0 24 24"><path d="M7 17 17 7"/><path d="M8 7h9v9"/></symbol>
     <symbol id="i-home" viewBox="0 0 24 24"><path d="M15 21v-8a1 1 0 0 0-1-1h-4a1 1 0 0 0-1 1v8"/><path d="M3 10a2 2 0 0 1 .709-1.528l7-5.999a2 2 0 0 1 2.582 0l7 5.999A2 2 0 0 1 21 10v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></symbol>
+    <symbol id="i-chart" viewBox="0 0 24 24"><path d="M3 3v16a2 2 0 0 0 2 2h16"/><path d="m19 9-5 5-4-4-3 3"/></symbol>
+    <symbol id="i-list" viewBox="0 0 24 24"><path d="M3 12h.01"/><path d="M3 18h.01"/><path d="M3 6h.01"/><path d="M8 12h13"/><path d="M8 18h13"/><path d="M8 6h13"/></symbol>
+    <symbol id="i-gear" viewBox="0 0 24 24"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></symbol>
+    <symbol id="i-chip" viewBox="0 0 24 24"><rect x="5" y="5" width="14" height="14" rx="2"/><rect x="9" y="9" width="6" height="6" rx="1"/><path d="M9 2v3"/><path d="M15 2v3"/><path d="M9 19v3"/><path d="M15 19v3"/><path d="M2 9h3"/><path d="M2 15h3"/><path d="M19 9h3"/><path d="M19 15h3"/></symbol>
+    <symbol id="i-locate" viewBox="0 0 24 24"><circle cx="12" cy="12" r="7"/><circle cx="12" cy="12" r="2"/><path d="M12 2v3"/><path d="M12 19v3"/><path d="M2 12h3"/><path d="M19 12h3"/></symbol>
+    <symbol id="i-back" viewBox="0 0 24 24"><path d="m15 18-6-6 6-6"/></symbol>
+    <symbol id="i-restart" viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></symbol>
+    <!-- 스마트 창문 로고 (창문 + 들어오는 바람) -->
+    <symbol id="i-logo" viewBox="0 0 64 64"><rect width="64" height="64" rx="18" fill="#3182F6"/><rect x="25" y="13" width="27" height="38" rx="5" fill="#fff" fill-opacity=".18" stroke="#fff" stroke-width="3.5"/><path d="M38.5 13v38" stroke="#fff" stroke-width="3.5"/><path d="M9 26h9a4 4 0 1 0-4-4" fill="none" stroke="#CDE4FF" stroke-width="3.5" stroke-linecap="round"/><path d="M9 34h11" fill="none" stroke="#CDE4FF" stroke-width="3.5" stroke-linecap="round"/><path d="M9 42h7a4 4 0 1 1-4 4" fill="none" stroke="#CDE4FF" stroke-width="3.5" stroke-linecap="round"/></symbol>
   </defs>
 </svg>
 
@@ -54,10 +64,13 @@
   <header class="appbar">
     <div class="navbar">
       <div class="brand">
-        <h1>스마트 창문</h1>
-        <!-- 라즈베리파이 연결 상태 -->
-        <div class="conn" id="conn" data-state="waiting">
-          <span class="conn-dot"></span><span id="connText">라즈베리파이를 기다리는 중</span>
+        <svg class="brand-logo" aria-hidden="true"><use href="#i-logo"/></svg>
+        <div class="brand-text">
+          <h1>스마트 창문</h1>
+          <!-- 라즈베리파이 연결 상태 -->
+          <div class="conn" id="conn" data-state="waiting">
+            <span class="conn-dot"></span><span id="connText">라즈베리파이를 기다리는 중</span>
+          </div>
         </div>
       </div>
       <nav class="nav-actions">
@@ -71,24 +84,7 @@
           <span class="mt-track"><span class="mt-knob"></span></span>
           <span class="mt-label" id="modeLabel">자동</span>
         </button>
-        <!-- 활동 기록 -->
-        <button class="nav-icon" onclick="openSheet('eventsSheet')" aria-label="활동 기록">
-          <svg class="ic"><use href="#i-clock"/></svg>
-        </button>
-        <!-- 테마: 밝은 테마면 달(누르면 어둡게), 어두운 테마면 해(누르면 밝게) -->
-        <button class="nav-icon" id="themeBtn" onclick="toggleTheme()" aria-label="어두운 테마로 바꾸기">
-          <svg class="ic"><use id="themeIcon" href="#i-moon"/></svg>
-        </button>
       </nav>
-    </div>
-
-    <!-- 페이지 탭 (모바일: 스와이프와 연동) -->
-    <div class="tabs" id="tabs" role="tablist">
-      <button class="tab active" role="tab" onclick="goPage(0)">창문</button>
-      <button class="tab" role="tab" onclick="goPage(1)">공기</button>
-      <button class="tab" role="tab" onclick="goPage(2)">추이</button>
-      <button class="tab" role="tab" onclick="goPage(3)">요약</button>
-      <span class="tab-ind" id="tabInd"></span>
     </div>
   </header>
 
@@ -130,7 +126,7 @@
         </button>
 
         <!-- 정기 환기 시각 (눌러서 변경) -->
-        <button class="schedule-link" onclick="openSchedule(false)">
+        <button class="schedule-link" onclick="openSchedule()">
           <svg class="ic ic-sm"><use href="#i-clock"/></svg>
           <span>정기 환기 <span id="scheduleText">-</span></span>
           <span class="schedule-edit">변경</span>
@@ -263,7 +259,117 @@
       </div>
     </section>
 
+    <!-- 5. 설정 -->
+    <section class="page page-settings">
+      <div class="card settings-card">
+        <h3 class="card-title">설정</h3>
+        <div class="set-list">
+          <button class="set-row" onclick="openMapSheet()">
+            <span class="set-ic"><svg class="ic"><use href="#i-pin"/></svg></span>
+            <span class="set-label">위치</span>
+            <span class="set-value" id="setLocation">-</span>
+            <svg class="ic ic-sm set-go"><use href="#i-chevron"/></svg>
+          </button>
+          <button class="set-row" onclick="openDeviceSheet()">
+            <span class="set-ic"><svg class="ic"><use href="#i-chip"/></svg></span>
+            <span class="set-label">기기 연결</span>
+            <span class="set-value" id="setDevice">-</span>
+            <svg class="ic ic-sm set-go"><use href="#i-chevron"/></svg>
+          </button>
+          <button class="set-row" onclick="openSchedule()">
+            <span class="set-ic"><svg class="ic"><use href="#i-clock"/></svg></span>
+            <span class="set-label">정기 환기 시간</span>
+            <span class="set-value" id="setSchedule">-</span>
+            <svg class="ic ic-sm set-go"><use href="#i-chevron"/></svg>
+          </button>
+          <button class="set-row" onclick="openSheet('eventsSheet')">
+            <span class="set-ic"><svg class="ic"><use href="#i-list"/></svg></span>
+            <span class="set-label">활동 기록</span>
+            <span class="set-value">창문이 열리고 닫힌 기록</span>
+            <svg class="ic ic-sm set-go"><use href="#i-chevron"/></svg>
+          </button>
+          <button class="set-row" id="themeBtn" onclick="toggleTheme()">
+            <span class="set-ic"><svg class="ic"><use id="themeIcon" href="#i-moon"/></svg></span>
+            <span class="set-label">화면 테마</span>
+            <span class="set-value" id="setTheme">-</span>
+            <svg class="ic ic-sm set-go"><use href="#i-chevron"/></svg>
+          </button>
+          <button class="set-row" onclick="startOnboarding()">
+            <span class="set-ic"><svg class="ic"><use href="#i-restart"/></svg></span>
+            <span class="set-label">처음 화면 다시 보기</span>
+            <span class="set-value"></span>
+            <svg class="ic ic-sm set-go"><use href="#i-chevron"/></svg>
+          </button>
+        </div>
+      </div>
+    </section>
+
   </main>
+
+  <!-- ── 하단 탭바 (모바일: 스와이프와 연동) ─────── -->
+  <nav class="tabbar" id="tabbar" role="tablist">
+    <button class="tb active" role="tab" onclick="goPage(0)"><svg class="ic"><use href="#i-home"/></svg><span>홈</span></button>
+    <button class="tb" role="tab" onclick="goPage(1)"><svg class="ic"><use href="#i-wind"/></svg><span>공기</span></button>
+    <button class="tb" role="tab" onclick="goPage(2)"><svg class="ic"><use href="#i-chart"/></svg><span>추이</span></button>
+    <button class="tb" role="tab" onclick="goPage(3)"><svg class="ic"><use href="#i-list"/></svg><span>요약</span></button>
+    <button class="tb" role="tab" onclick="goPage(4)"><svg class="ic"><use href="#i-gear"/></svg><span>설정</span></button>
+  </nav>
+</div>
+
+<!-- ── 처음 설정 (처음 접속했을 때 한 번) ───────── -->
+<div class="onboard" id="onboard" hidden>
+  <div class="ob-top">
+    <button class="icon-btn" id="obBack" onclick="obGo(obStep - 1)" aria-label="이전"><svg class="ic"><use href="#i-back"/></svg></button>
+    <div class="ob-dots" id="obDots"><i></i><i></i><i></i></div>
+    <span class="ob-top-space"></span>
+  </div>
+
+  <!-- 0. 시작 -->
+  <section class="ob-step ob-welcome" data-step="0">
+    <div class="ob-hero">
+      <svg class="ob-logo" aria-hidden="true"><use href="#i-logo"/></svg>
+      <h1>스마트 창문</h1>
+      <p>바깥과 실내 공기를 비교해<br>알아서 창문을 열고 닫아요</p>
+    </div>
+    <div class="ob-actions">
+      <button class="btn btn-primary btn-block" onclick="obGo(1)">시작하기</button>
+    </div>
+  </section>
+
+  <!-- 1. 위치 -->
+  <section class="ob-step" data-step="1" hidden>
+    <h2 class="ob-title">창문이 있는 곳을 알려 주세요</h2>
+    <p class="ob-desc">그 지역의 날씨와 미세먼지를 기준으로 판단해요</p>
+    <button class="ob-locate" id="obLocate" onclick="obUseMyLocation()">
+      <svg class="ic"><use href="#i-locate"/></svg><span>현재 위치 사용하기</span>
+    </button>
+    <div class="ob-map" id="obMap"></div>
+    <p class="ob-picked" id="obPicked">지도를 눌러 위치를 골라 주세요</p>
+    <div class="ob-actions">
+      <button class="btn btn-primary btn-block" id="obLocNext" onclick="obSaveLocation()">다음</button>
+    </div>
+  </section>
+
+  <!-- 2. 기기 -->
+  <section class="ob-step" data-step="2" hidden>
+    <h2 class="ob-title">연결할 기기를 골라 주세요</h2>
+    <p class="ob-desc">창문에 달린 라즈베리파이가 켜져 있으면 아래에 나타나요</p>
+    <div class="device-list" id="obDevices"></div>
+    <div class="ob-actions btn-pair">
+      <button class="btn btn-gray" onclick="obGo(3)">넘어가기</button>
+      <button class="btn btn-primary" id="obDevNext" onclick="obGo(3)" disabled>다음</button>
+    </div>
+  </section>
+
+  <!-- 3. 정기 환기 시간 (아래 시트의 선택 화면을 옮겨 와서 씀) -->
+  <section class="ob-step" data-step="3" hidden>
+    <h2 class="ob-title">정기 환기 시간을 정해 주세요</h2>
+    <div id="obScheduleSlot"></div>
+    <div class="ob-actions btn-pair">
+      <button class="btn btn-gray" onclick="obScheduleLater()">나중에</button>
+      <button class="btn btn-primary" onclick="obScheduleSave()">완료</button>
+    </div>
+  </section>
 </div>
 
 <!-- ── 수동 모드일 때 아래에서 올라오는 조작 패널 ── -->
@@ -374,14 +480,16 @@
   </div>
 </div>
 
-<!-- 정기 환기 시각 시트 (처음 접속했을 때 한 번 / 변경할 때) -->
+<!-- 정기 환기 시각 시트 (설정에서 변경) -->
 <div class="sheet-backdrop" id="scheduleSheet" onclick="backdropClose(event)">
   <div class="sheet" role="dialog" aria-modal="true" aria-labelledby="scheduleTitle">
     <div class="sheet-handle"></div>
     <div class="sheet-head">
-      <h2 id="scheduleTitle">정기 환기 시간을 정해 주세요</h2>
+      <h2 id="scheduleTitle">정기 환기 시간 변경</h2>
       <button class="icon-btn" onclick="closeSheet('scheduleSheet')" aria-label="닫기"><svg class="ic"><use href="#i-x"/></svg></button>
     </div>
+    <div id="scheduleSheetSlot">
+    <div id="scheduleBody">
     <p class="sheet-desc">하루 3번, 정해진 시간에 30분씩 환기해요.<br>비가 오거나 바람이 강하면 그 회차는 건너뛰어요.</p>
     <div class="schedule-options">
       <button class="schedule-opt" data-kind="home" onclick="pickSchedule('home')">
@@ -405,10 +513,26 @@
       <input type="time" id="schT3" aria-label="세 번째 정기 환기 시각">
     </div>
     <p class="schedule-error" id="scheduleError" role="alert"></p>
-    <div class="btn-pair">
-      <button class="btn btn-gray" id="scheduleLater" onclick="laterSchedule()">나중에</button>
-      <button class="btn btn-primary" id="scheduleSave" onclick="saveSchedule()">저장</button>
     </div>
+    </div>
+    <div class="btn-pair">
+      <button class="btn btn-gray" onclick="closeSheet('scheduleSheet')">취소</button>
+      <button class="btn btn-primary" onclick="saveSchedule()">저장</button>
+    </div>
+  </div>
+</div>
+
+<!-- 기기 연결 시트 (설정) -->
+<div class="sheet-backdrop" id="deviceSheet" onclick="backdropClose(event)">
+  <div class="sheet" role="dialog" aria-modal="true" aria-labelledby="deviceTitle">
+    <div class="sheet-handle"></div>
+    <div class="sheet-head">
+      <h2 id="deviceTitle">기기 연결</h2>
+      <button class="icon-btn" onclick="closeSheet('deviceSheet')" aria-label="닫기"><svg class="ic"><use href="#i-x"/></svg></button>
+    </div>
+    <p class="sheet-desc">서버에 데이터를 보내고 있는 기기가 아래에 나타나요</p>
+    <div class="device-list" id="sheetDevices"></div>
+    <button class="btn btn-gray btn-block device-unlink" id="deviceUnlink" onclick="pickDevice(null, 'sheetDevices')" hidden>연결 해제</button>
   </div>
 </div>
 
@@ -539,8 +663,7 @@ function openSheet(id){
 }
 
 function closeSheet(id){
-  // 처음 정기 환기 시각을 묻는 중에 그냥 닫으면 "나중에"와 같게 처리
-  if(id === 'scheduleSheet' && scheduleOnboarding){ laterSchedule(); return; }
+  if(id === 'deviceSheet') stopDevicePoll();
   $(id).classList.remove('open');
   if(!document.querySelector('.sheet-backdrop.open')) document.body.classList.remove('sheet-open');
   // 확인 시트를 그냥 닫으면 "취소"로 처리
@@ -781,26 +904,24 @@ const SCHEDULE_PRESETS = {
   out:  ['07:30', '19:00', '21:30'],   // 낮에는 외출해요
 };
 let scheduleChoice = 'home';
-let scheduleOnboarding = false;   // 처음 묻는 중인가 (닫으면 "나중에"로 처리)
-let scheduleAsked = false;        // 이 화면에서 이미 물어봤는가
 
 function renderSchedule(s){
-  $('scheduleText').textContent = (s.vent_schedule || []).join(' · ');
-  if(s.vent_schedule_set === false && !scheduleAsked){
-    scheduleAsked = true;
-    openSchedule(true);
-  }
+  const text = (s.vent_schedule || []).join(' · ');
+  $('scheduleText').textContent = text;
+  $('setSchedule').textContent = text;
 }
 
-function openSchedule(onboarding){
-  scheduleOnboarding = onboarding;
+// 선택 화면을 지금 정해진 시각으로 채우기
+function fillSchedule(onboarding){
   const now = lastState.vent_schedule || SCHEDULE_PRESETS.home;
   const preset = Object.keys(SCHEDULE_PRESETS).find(k => SCHEDULE_PRESETS[k].join() === now.join());
-  $('scheduleTitle').textContent = onboarding ? '정기 환기 시간을 정해 주세요' : '정기 환기 시간 변경';
-  $('scheduleLater').textContent = onboarding ? '나중에' : '취소';
   ['schT1', 'schT2', 'schT3'].forEach((id, i) => $(id).value = now[i] || '');
-  $('scheduleError').textContent = '';
   pickSchedule(onboarding ? 'home' : (preset || 'custom'));
+}
+
+function openSchedule(){
+  $('scheduleSheetSlot').append($('scheduleBody'));
+  fillSchedule(false);
   openSheet('scheduleSheet');
 }
 
@@ -815,14 +936,20 @@ function pickSchedule(kind){
   $('scheduleError').textContent = '';
 }
 
-async function saveSchedule(){
+// 고른 시각 (빈칸이 있으면 null)
+function chosenTimes(){
   const times = scheduleChoice === 'custom'
     ? ['schT1', 'schT2', 'schT3'].map(id => $(id).value)
     : SCHEDULE_PRESETS[scheduleChoice];
-  if(times.some(t => !t)){ $('scheduleError').textContent = '시간 3개를 모두 정해 주세요'; return; }
+  if(times.some(t => !t)){ $('scheduleError').textContent = '시간 3개를 모두 정해 주세요'; return null; }
+  return times;
+}
+
+async function saveSchedule(){
+  const times = chosenTimes();
+  if(!times) return;
   try {
     const r = await api('/api/schedule', { times, preset: scheduleChoice });
-    scheduleOnboarding = false;
     closeSheet('scheduleSheet');
     toast(`정기 환기 시간을 ${r.times.join(' · ')}로 정했어요`);
     refresh();
@@ -831,18 +958,198 @@ async function saveSchedule(){
   }
 }
 
+// ════════════════════════════════════════════════════
+// 처음 설정 (시작 → 위치 → 기기 → 정기 환기) — 서버에 '마침'이 저장되면 다시 안 나옴
+// ════════════════════════════════════════════════════
+let obStep = 0;
+let obShown = false;          // 이 화면에서 이미 띄웠는가
+let obMap = null, obMarker = null;
+let obLat = null, obLng = null, obMoved = false;
+
+function maybeOnboard(s){
+  if(s.onboarded === false && !obShown) startOnboarding();
+}
+
+function startOnboarding(){
+  obShown = true;
+  obMoved = false;
+  $('onboard').hidden = false;
+  document.body.classList.add('onboarding');
+  obGo(0);
+}
+
+function obGo(step){
+  obStep = Math.max(0, step);
+  document.querySelectorAll('.ob-step').forEach(el => el.hidden = Number(el.dataset.step) !== obStep);
+  $('obBack').style.visibility = obStep === 0 ? 'hidden' : '';
+  $('obDots').style.visibility = obStep === 0 ? 'hidden' : '';
+  [...$('obDots').children].forEach((d, i) => d.classList.toggle('on', i === obStep - 1));
+  stopDevicePoll();
+  if(obStep === 1) obInitMap();
+  if(obStep === 2) startDevicePoll('obDevices');
+  if(obStep === 3){
+    $('obScheduleSlot').append($('scheduleBody'));
+    fillSchedule(true);
+  }
+}
+
+async function finishOnboarding(){
+  await api('/api/onboarding', { done: true });
+  stopDevicePoll();
+  const el = $('onboard');
+  el.classList.add('leaving');
+  setTimeout(() => {
+    el.hidden = true;
+    el.classList.remove('leaving');
+    document.body.classList.remove('onboarding');
+    goPage(0);
+  }, 300);
+  refresh();
+}
+
+// ── 1. 위치 ──
+function obInitMap(){
+  obLat = obLat ?? lastState.lat ?? DEFAULT_LAT;
+  obLng = obLng ?? lastState.lon ?? DEFAULT_LNG;
+  obShowPicked();
+  if(typeof naver === 'undefined'){
+    $('obMap').innerHTML = '<div class="map-error">지도를 불러오지 못했어요</div>';
+    return;
+  }
+  if(!obMap){
+    const at = new naver.maps.LatLng(obLat, obLng);
+    obMap = new naver.maps.Map('obMap', { center: at, zoom: 14 });
+    obMarker = new naver.maps.Marker({ position: at, map: obMap });
+    naver.maps.Event.addListener(obMap, 'click', e => obPick(e.coord.lat(), e.coord.lng(), false));
+  } else {
+    naver.maps.Event.trigger(obMap, 'resize');
+  }
+}
+
+function obPick(lat, lng, pan){
+  obLat = lat; obLng = lng; obMoved = true;
+  if(obMarker){
+    const at = new naver.maps.LatLng(lat, lng);
+    obMarker.setPosition(at);
+    if(pan) obMap.setCenter(at);
+  }
+  obShowPicked();
+}
+
+function obShowPicked(){
+  $('obPicked').textContent = obMoved
+    ? `선택한 위치 · 위도 ${obLat.toFixed(5)} · 경도 ${obLng.toFixed(5)}`
+    : (lastState.station ? `지금은 ${lastState.station} 측정소 기준이에요. 바꾸려면 지도를 눌러 주세요` : '지도를 눌러 위치를 골라 주세요');
+}
+
+function obUseMyLocation(){
+  if(!navigator.geolocation){ toast('이 브라우저에서는 현재 위치를 가져올 수 없어요', true); return; }
+  const btn = $('obLocate'), label = btn.querySelector('span');
+  btn.disabled = true; label.textContent = '현재 위치를 확인하는 중…';
+  const done = () => { btn.disabled = false; label.textContent = '현재 위치 사용하기'; };
+  navigator.geolocation.getCurrentPosition(
+    p => { obPick(p.coords.latitude, p.coords.longitude, true); done(); },
+    err => {
+      toast(err.code === 1 ? '위치 권한이 꺼져 있어요. 지도에서 골라 주세요' : '현재 위치를 가져오지 못했어요. 지도에서 골라 주세요', true);
+      done();
+    },
+    { enableHighAccuracy: true, timeout: 10000 }
+  );
+}
+
+async function obSaveLocation(){
+  if(!obMoved){ obGo(2); return; }          // 그대로 두면 지금 위치 유지
+  const btn = $('obLocNext');
+  btn.disabled = true; btn.textContent = '저장하는 중…';
+  try {
+    const r = await api('/api/location', { lat: obLat, lng: obLng });
+    toast(`${r.station} 측정소 기준으로 볼게요`);
+    refresh();
+    obGo(2);
+  } catch(e){
+    toast('위치를 저장하지 못했어요: ' + e.message, true);
+  } finally {
+    btn.disabled = false; btn.textContent = '다음';
+  }
+}
+
+// ── 3. 정기 환기 ──
+async function obScheduleSave(){
+  const times = chosenTimes();
+  if(!times) return;
+  try {
+    const r = await api('/api/schedule', { times, preset: scheduleChoice });
+    await finishOnboarding();
+    toast(`정기 환기 시간을 ${r.times.join(' · ')}로 정했어요`);
+  } catch(e){
+    $('scheduleError').textContent = e.message;
+  }
+}
+
 // "나중에": 추천 1번(10:00 · 15:00 · 20:00)으로 진행한다고 알리고 저장
-async function laterSchedule(){
-  if(!scheduleOnboarding){ closeSheet('scheduleSheet'); return; }
-  scheduleOnboarding = false;
-  closeSheet('scheduleSheet');
+async function obScheduleLater(){
   const times = SCHEDULE_PRESETS.home;
   try {
     await api('/api/schedule', { times, preset: 'later' });
-    toast(`추천 시간(${times.join(' · ')})으로 정기 환기를 진행할게요. 창문 화면에서 언제든 바꿀 수 있어요`, false, 5000);
+    await finishOnboarding();
+    toast(`추천 시간(${times.join(' · ')})으로 정기 환기를 진행할게요. 설정에서 언제든 바꿀 수 있어요`, false, 5000);
+  } catch(e){
+    toast('저장하지 못했어요: ' + e.message, true);
+  }
+}
+
+// ════════════════════════════════════════════════════
+// 기기 연결 (최근에 데이터를 보낸 라즈베리파이 목록)
+// ════════════════════════════════════════════════════
+let devicePoll = null;
+
+function startDevicePoll(target){
+  stopDevicePoll();
+  loadDevices(target);
+  devicePoll = setInterval(() => loadDevices(target), 3000);
+}
+function stopDevicePoll(){
+  clearInterval(devicePoll);
+  devicePoll = null;
+}
+
+function openDeviceSheet(){
+  openSheet('deviceSheet');
+  startDevicePoll('sheetDevices');
+}
+
+async function loadDevices(target){
+  let data;
+  try { data = await api('/api/devices'); } catch(e){ return; }
+  const box = $(target);
+  if(!data.devices.length){
+    box.innerHTML = `<div class="device-empty"><span class="spinner"></span>
+      <div>기기를 찾고 있어요…</div>
+      <small>라즈베리파이가 켜져 있고 서버에 데이터를 보내면 여기에 나타나요</small></div>`;
+  } else {
+    box.innerHTML = data.devices.map(d => `
+      <button class="device-item${d.selected ? ' selected' : ''}" data-name="${escapeHTML(d.name)}"
+              onclick="pickDevice(this.dataset.name, '${target}')">
+        <span class="device-ic"><svg class="ic"><use href="#i-chip"/></svg></span>
+        <span class="device-text">
+          <span class="device-name">${escapeHTML(d.name)}</span>
+          <span class="device-sub">${d.online ? `${agoText(d.seconds_ago)} 데이터 받음` : `연결 끊김 · ${agoText(d.seconds_ago)}`}${d.selected ? ' · 연결됨' : ''}</span>
+        </span>
+        <svg class="ic device-check"><use href="#i-check"/></svg>
+      </button>`).join('');
+  }
+  if(target === 'obDevices') $('obDevNext').disabled = !data.selected;
+  if(target === 'sheetDevices') $('deviceUnlink').hidden = !data.selected;
+}
+
+async function pickDevice(name, target){
+  try {
+    await api('/api/device', { name });
+    toast(name ? `${name}에 연결했어요` : '기기 연결을 해제했어요');
+    loadDevices(target);
     refresh();
   } catch(e){
-    toast('정기 환기 시간을 저장하지 못했어요: ' + e.message, true);
+    toast('기기를 연결하지 못했어요: ' + e.message, true);
   }
 }
 
@@ -1006,6 +1313,7 @@ function renderMode(mode){
 function syncDockSpace(){
   const h = document.body.classList.contains('manual') ? $('dock').offsetHeight : 0;
   document.documentElement.style.setProperty('--dock-h', h + 'px');
+  document.documentElement.style.setProperty('--tabbar-h', $('tabbar').offsetHeight + 'px');
 }
 window.addEventListener('resize', syncDockSpace);
 
@@ -1015,15 +1323,16 @@ const OFFLINE_AFTER_SEC = 30;
 
 function renderConn(s){
   const i = s.indoor || {};
+  const name = s.device || '라즈베리파이';
   let state, text;
   let when = '';
   if(!i.updated_at){
     state = 'waiting';
-    text = '라즈베리파이 기다리는 중';
+    text = `${name} 기다리는 중`;
   } else {
     const age = (tsMs(s.server_time) - tsMs(i.updated_at)) / 1000;
     state = age <= OFFLINE_AFTER_SEC ? 'online' : 'offline';
-    text = state === 'online' ? '라즈베리파이 연결됨' : '라즈베리파이 연결 끊김';
+    text = state === 'online' ? `${name} 연결됨` : `${name} 연결 끊김`;
     when = state === 'online' ? `· ${agoText(age)} 수신` : `· ${agoText(age)}`;
   }
   $('conn').dataset.state = state;
@@ -1072,6 +1381,9 @@ async function refresh(){
   try {
     const s = await api('/api/status');
     lastState = s;
+    maybeOnboard(s);
+    $('setLocation').textContent = s.station ? `${s.station} 측정소` : '설정 안 됨';
+    $('setDevice').textContent = s.device || '연결 안 됨';
 
     // 상태가 바뀌었으면 활동 기록도 새로 불러오기
     if(s.updated_at !== lastUpdatedAt){
@@ -1213,6 +1525,7 @@ function renderThemeIcon(){
   const dark = document.documentElement.dataset.theme === 'dark';
   $('themeIcon').setAttribute('href', dark ? '#i-sun' : '#i-moon');
   $('themeBtn').setAttribute('aria-label', dark ? '밝은 테마로 바꾸기' : '어두운 테마로 바꾸기');
+  $('setTheme').textContent = dark ? '어둡게' : '밝게';
 }
 
 function toggleTheme(){
@@ -1240,7 +1553,7 @@ const EVENT_WINDOW = {
   half:   { title:'창문 반쯤 열림', cls:'half' },
   closed: { title:'창문 닫힘',      cls:'closed' },
 };
-const EVENT_KIND = { timer:'타이머', mode:'모드 변경', location:'위치 변경', schedule:'정기 환기' };
+const EVENT_KIND = { timer:'타이머', mode:'모드 변경', location:'위치 변경', schedule:'정기 환기', device:'기기 연결' };
 const SOURCE_SHORT = { auto:'자동', manual:'직접', timer:'타이머', system:'시스템' };
 
 // 오늘이면 "15:32", 아니면 "9/21 15:32"
@@ -1278,11 +1591,11 @@ async function loadEvents(){
 }
 
 // ════════════════════════════════════════════════════
-// 스와이프 페이지 (창문 | 공기 | 추이 | 요약)
-// 모바일: 가로 스크롤 스냅 + 탭 밑줄 연동 / PC: CSS로 나란히 펼침
+// 스와이프 페이지 (홈 | 공기 | 추이 | 요약 | 설정)
+// 모바일: 가로 스크롤 스냅 + 하단 탭바 연동 / PC: CSS로 나란히 펼침
 // ════════════════════════════════════════════════════
 const pager = $('pager');
-const tabs = [...document.querySelectorAll('#tabs .tab')];
+const tabs = [...document.querySelectorAll('#tabbar .tb')];
 
 function goPage(i){
   pager.scrollTo({ left: i * pager.clientWidth, behavior: 'smooth' });
@@ -1291,7 +1604,6 @@ function goPage(i){
 function syncTabs(){
   const w = pager.clientWidth || 1;
   const p = Math.min(Math.max(pager.scrollLeft / w, 0), tabs.length - 1);
-  $('tabInd').style.transform = `translateX(${p * 100}%)`;
   const cur = Math.round(p);
   tabs.forEach((t, i) => {
     t.classList.toggle('active', i === cur);

@@ -98,6 +98,10 @@ state = {
     "slot_done": None,           # 처리한 정기 환기 회차 ("2026-10-08 15:00")
     "slot_pending": None,        # 정기 시각이 됐지만 아직 못 연 회차
     "vent_schedule": None,       # 사용자가 정한 정기 환기 시각 ["HH:MM" ×3]. None 이면 아직 안 정함 → 기본 시각 사용
+    # ── 처음 설정 / 기기 ──
+    "onboarded": False,          # 처음 설정(위치·기기·정기 환기)을 마쳤는가. False 면 대시보드가 처음 화면을 보여 줌
+    "device": None,              # 사용자가 연결한 기기 이름
+    "devices": {},               # 최근에 데이터를 보낸 기기 {이름: {"name", "last_seen"}}
     # ── 바깥 값 받기 ──
     "refreshing": False,         # 위치를 바꿔서 새 위치의 값을 받는 중
     "rain_outlook": None,        # 앞으로 48시간 비 소식 (단기예보, 화면 표시용)
@@ -482,7 +486,7 @@ def add_event(kind, reason, source, window_status=None):
 def save_settings():
     """재시작해도 유지할 설정(모드·위치·측정소) 저장"""
     with state_lock:
-        values = {k: state.get(k) for k in ("mode", "lat", "lon", "station", "vent_schedule")}
+        values = {k: state.get(k) for k in ("mode", "lat", "lon", "station", "vent_schedule", "onboarded", "device")}
     _db_safe("설정 저장", db.set_settings, **values)
 
 
@@ -772,8 +776,15 @@ class LocationRequest(BaseModel):
     lat: float
     lng: float
 
+class OnboardingRequest(BaseModel):
+    done: bool = True
+
+class DeviceRequest(BaseModel):
+    name: Optional[str] = None                         # None 이면 연결 해제
+
 class SensorData(BaseModel):
     """라즈베리파이에서 보내는 실내 센서 데이터"""
+    device: Optional[str] = None                       # 기기 이름 (안 보내면 '라즈베리파이')
     pm25: Optional[float] = None
     pm10: Optional[float] = None
     co2: Optional[float] = None
@@ -814,14 +825,17 @@ async def get_status():
     snap["vent_cycle_test"] = VENT_CYCLE_TEST
     snap["vent_schedule_set"] = bool(snap.get("vent_schedule"))                 # False 면 대시보드가 처음 한 번 시각을 물어봄
     snap["vent_schedule"] = list(snap.get("vent_schedule") or VENT_SCHEDULE)
+    snap.pop("devices", None)                                                    # 기기 목록은 /api/devices 에서
     return snap
 
 @app.get("/api/command")
-async def get_command():
+async def get_command(device: Optional[str] = None):
     """
     라즈베리파이용 명령 엔드포인트.
     창문 = LED로 시각화 (open → LED ON, closed → LED OFF)
+    device: 기기 이름 (?device=거실 창문). 안 보내면 '라즈베리파이'
     """
+    seen_device(device)
     with state_lock:
         window = state["window_status"]
         return {
@@ -873,10 +887,60 @@ async def control_window(req: WindowRequest):
     add_event("window", "직접 열기" if req.status == "open" else "직접 닫기", "manual", req.status)
     return {"ok": True, "status": req.status}
 
+# ── 기기 (라즈베리파이) ───────────────────────────────────────────────────
+DEVICE_ONLINE_SECONDS = 60     # 이 안에 데이터를 보낸 기기만 '연결할 수 있는 기기'로 보여 줌
+DEFAULT_DEVICE_NAME = "라즈베리파이"
+
+
+def seen_device(name):
+    """기기가 데이터를 보내거나 명령을 물어봤음을 기록"""
+    name = (name or DEFAULT_DEVICE_NAME).strip()[:30] or DEFAULT_DEVICE_NAME
+    with state_lock:
+        state["devices"][name] = {"name": name, "last_seen": now_str()}
+
+
+@app.get("/api/devices")
+async def get_devices():
+    """최근에 데이터를 보낸 기기 목록 (처음 설정·설정 화면에서 기기 선택용)"""
+    now_dt = now_local()
+    with state_lock:
+        devices = [dict(d) for d in state["devices"].values()]
+        selected = state.get("device")
+    result = []
+    for d in devices:
+        age = (now_dt - datetime.strptime(d["last_seen"], "%Y-%m-%d %H:%M:%S")).total_seconds()
+        if age <= DEVICE_ONLINE_SECONDS or d["name"] == selected:
+            result.append({**d, "seconds_ago": max(0, round(age)), "online": age <= DEVICE_ONLINE_SECONDS,
+                           "selected": d["name"] == selected})
+    result.sort(key=lambda d: d["seconds_ago"])
+    return {"devices": result, "selected": selected}
+
+
+@app.post("/api/device")
+async def set_device(req: DeviceRequest):
+    """연결할 기기 선택 (None 이면 연결 해제)"""
+    with state_lock:
+        state["device"] = req.name
+        state["updated_at"] = now_str()
+    add_event("device", f"기기 연결 → {req.name}" if req.name else "기기 연결 해제", "manual")
+    save_settings()
+    return {"ok": True, "device": req.name}
+
+
+@app.post("/api/onboarding")
+async def set_onboarding(req: OnboardingRequest):
+    """처음 설정을 마쳤음을 저장 (다음 접속부터는 처음 화면을 건너뜀)"""
+    with state_lock:
+        state["onboarded"] = req.done
+    save_settings()
+    return {"ok": True, "onboarded": req.done}
+
+
 # 라즈베리파이 데이터 받기
 @app.post("/api/sensors")
 async def receive_sensors(data: SensorData):
     received = {k: v for k, v in data.model_dump().items() if v is not None}
+    seen_device(received.pop("device", None))
 
     if not received:
         raise HTTPException(400, "보낸 데이터가 비어있음")
@@ -1116,7 +1180,7 @@ async def startup():
         # 지난번에 쓰던 모드·위치 복원
         saved = db.get_settings()
         with state_lock:
-            for key in ("mode", "lat", "lon", "station", "vent_schedule"):
+            for key in ("mode", "lat", "lon", "station", "vent_schedule", "onboarded", "device"):
                 if saved.get(key) is not None:
                     state[key] = saved[key]
         if saved:
