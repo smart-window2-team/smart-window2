@@ -6,6 +6,7 @@ from fastapi.staticfiles import StaticFiles
 import json
 import os
 import threading
+from collections import deque
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
@@ -102,6 +103,11 @@ state = {
     "onboarded": False,          # 처음 설정(위치·기기·정기 환기)을 마쳤는가. False 면 대시보드가 처음 화면을 보여 줌
     "device": None,              # 사용자가 연결한 기기 이름
     "devices": {},               # 최근에 데이터를 보낸 기기 {이름: {"name", "last_seen"}}
+    # ── 빗물 센서 ──
+    "rain_value": None,          # 마지막으로 받은 빗물 센서 값 (0.0~1.0)
+    "rain_updated_at": None,     # 그 값을 받은 시각 (ISO)
+    "rain_raining": False,       # 빗물 센서로 본 '지금 비가 옴'
+    "rain_dry_since": None,      # 비로 판단한 뒤 마르기 시작한 시각 (ISO)
     # ── 바깥 값 받기 ──
     "refreshing": False,         # 위치를 바꿔서 새 위치의 값을 받는 중
     "rain_outlook": None,        # 앞으로 48시간 비 소식 (단기예보, 화면 표시용)
@@ -127,6 +133,14 @@ PM10_VBAD, PM25_VBAD = 150, 75    # 초과면 바깥 '매우나쁨'
 INDOOR_PM_GAP = 5                 # 실내 미세먼지가 바깥보다 이만큼 이상 높고
 INDOOR_PM_MIN = {"pm25": 15, "pm10": 30}   # 이 값 이상일 때만 '실내가 더 탁함' (둘 다 깨끗한데 여는 것 방지)
 INDOOR_STALE_SECONDS = 300        # 센서값이 이보다 오래됐으면 판단에 쓰지 않음 (라즈베리파이 꺼짐)
+# 빗물 센서 (SZH-SSBH-022 + MCP3008, 0.0 = 물에 덮임 ~ 1.0 = 완전 건조)
+RAIN_WET_BELOW = 0.55             # 이 미만이면 '젖음' (0.55~0.79 보슬비·한두 방울은 무시)
+RAIN_DRY_FROM = 0.80              # 이 이상이면 '마름' (이슬·습기 포함)
+RAIN_CONFIRM_SECONDS = 30         # 최근 이 시간 동안의 값 중
+RAIN_CONFIRM_RATIO = 0.8          #   이 비율 이상이 젖음이면 '비' (한 방울·잠깐 튄 물은 걸러짐)
+RAIN_CLEAR_SECONDS = 10 * 60      # 비로 판단한 뒤에는 이 시간 동안 계속 말라 있어야 '그침'
+RAIN_STALE_SECONDS = 60           # 빗물 센서 값이 이보다 오래됐으면 판단에 쓰지 않음
+RAIN_LEVELS = ((0.95, "완전 건조"), (0.80, "이슬·습기"), (0.55, "보슬비"), (0.25, "일반 비"), (0.0, "폭우·물 고임"))
 
 VENT_SCHEDULE = ("10:00", "15:00", "20:00")   # 정기 환기 기본 시각 (하루 3번) — 사용자가 정하지 않았을 때
 SCHEDULE_MIN_GAP_SECONDS = 2 * 60 * 60        # 사용자가 정하는 정기 환기 시각끼리의 최소 간격
@@ -164,6 +178,57 @@ def indoor_dirtier(indoor, air):
         if i_v is not None and o_v is not None and i_v >= INDOOR_PM_MIN[key] and i_v - o_v >= INDOOR_PM_GAP:
             return name, i_v, o_v
     return None
+
+
+rain_samples = deque(maxlen=240)   # 최근 빗물 센서 값 [(시각, 값)] (state_lock 안에서 다룸)
+
+
+def normalize_rain(value):
+    """빗물 센서 값을 0.0~1.0 으로 맞춤. MCP3008 원래 값(0~1023)으로 와도 비율로 바꿈, 음수는 버림"""
+    if value is None or value < 0:
+        return None
+    if value > 1:
+        value = value / 1023 if value <= 1023 else 1.0
+    return round(value, 3)
+
+
+def rain_level(value):
+    """빗물 센서 값 → 상태 이름 (완전 건조 / 이슬·습기 / 보슬비 / 일반 비 / 폭우·물 고임)"""
+    return next(name for edge, name in RAIN_LEVELS if value >= edge) if value is not None else None
+
+
+def update_rain(value, now_dt):
+    """빗물 센서 값 하나 반영 (state_lock 을 잡은 채로 호출). 비/그침이 바뀌면 True
+    - 비: 최근 30초 값의 80% 이상이 젖음(0.55 미만)이고, 20초 이상 쌓였을 때 → 한 방울은 걸러짐
+    - 그침: 비로 판단한 뒤 10분 동안 계속 마름(0.80 이상)"""
+    rain_samples.append((now_dt, value))
+    state["rain_value"] = value
+    state["rain_updated_at"] = now_dt.isoformat()
+    recent = [(t, v) for t, v in rain_samples if (now_dt - t).total_seconds() <= RAIN_CONFIRM_SECONDS]
+    was = state["rain_raining"]
+    if not was:
+        span = (now_dt - recent[0][0]).total_seconds()
+        wet = sum(1 for _, v in recent if v < RAIN_WET_BELOW)
+        if span >= RAIN_CONFIRM_SECONDS * 2 / 3 and wet >= len(recent) * RAIN_CONFIRM_RATIO:
+            state["rain_raining"] = True
+            state["rain_dry_since"] = None
+    elif value >= RAIN_DRY_FROM:
+        since = datetime.fromisoformat(state["rain_dry_since"]) if state["rain_dry_since"] else now_dt
+        state["rain_dry_since"] = since.isoformat()
+        if (now_dt - since).total_seconds() >= RAIN_CLEAR_SECONDS:
+            state["rain_raining"] = False
+            state["rain_dry_since"] = None
+    else:
+        state["rain_dry_since"] = None                 # 다시 젖음 → 마른 시간 처음부터
+    return state["rain_raining"] != was
+
+
+def rain_sensor_on(snap, now_dt):
+    """판단에 쓸 '빗물 센서가 비를 감지함' (값이 1분 넘게 안 오면 쓰지 않음)"""
+    at = snap.get("rain_updated_at")
+    if not at or (now_dt - datetime.fromisoformat(at)).total_seconds() > RAIN_STALE_SECONDS:
+        return False
+    return bool(snap.get("rain_raining"))
 
 
 def usable_indoor(indoor, now_dt):
@@ -259,6 +324,7 @@ def judge_context(snap, now_dt, slot_due):
         "resting": bool(rest and now_dt < rest),
         "rest_left": max(0, round((rest - now_dt).total_seconds())) if rest else 0,
         "wind_hold": bool(snap.get("wind_hold")),
+        "rain_sensor": rain_sensor_on(snap, now_dt),
         "slot_due": slot_due,
         "slot_label": slot.strftime("%H:%M") if slot else None,
         "next_label": next_slot(now_dt).strftime("%H:%M"),
@@ -292,6 +358,8 @@ def decide_window(weather, air, indoor=None, ctx=None):
     # ── ① 안전: 언제든 닫음 (환기 중이어도 중단) ──
     if pty != 0:
         return closed("rain", f"강수({weather.get('precipitation')}) → 닫힘")
+    if ctx.get("rain_sensor"):
+        return closed("rain", "빗물 센서 비 감지 → 닫힘")
     if wind >= WIND_CLOSE or (ctx.get("wind_hold") and wind >= WIND_REOPEN):
         return closed("wind", f"강풍({wind}m/s) → 닫힘")
 
@@ -363,7 +431,9 @@ def explain_window(weather, air, indoor, decision, ctx=None):
                        "detail": detail, "decisive": decisive})
 
     # 1) 강수
-    if not weather:
+    if ctx.get("rain_sensor"):
+        add("rain", "close", "빗물 센서가 비를 감지했어요", "", rule == "rain")
+    elif not weather:
         add("rain", "none", "날씨 정보를 못 받았어요", "")
     elif weather.get("precipitation_code", 0) != 0:
         add("rain", "close", "비·눈이 와요",
@@ -785,6 +855,8 @@ class DeviceRequest(BaseModel):
 class SensorData(BaseModel):
     """라즈베리파이에서 보내는 실내 센서 데이터"""
     device: Optional[str] = None                       # 기기 이름 (안 보내면 '라즈베리파이')
+    rain_sensor: Optional[float] = None                # 빗물 센서 (0.0 = 물에 덮임 ~ 1.0 = 완전 건조)
+    rain: Optional[float] = None                       # rain_sensor 와 같은 값 (다른 이름으로 보내도 받음)
     pm25: Optional[float] = None
     pm10: Optional[float] = None
     co2: Optional[float] = None
@@ -826,6 +898,15 @@ async def get_status():
     snap["vent_schedule_set"] = bool(snap.get("vent_schedule"))                 # False 면 대시보드가 처음 한 번 시각을 물어봄
     snap["vent_schedule"] = list(snap.get("vent_schedule") or VENT_SCHEDULE)
     snap.pop("devices", None)                                                    # 기기 목록은 /api/devices 에서
+    rain_at = snap.pop("rain_updated_at", None)
+    snap["rain_sensor"] = None if rain_at is None else {                         # 빗물 센서 (값을 받은 적이 있을 때)
+        "value": snap.get("rain_value"), "level": rain_level(snap.get("rain_value")),
+        "raining": ctx["rain_sensor"],
+        "fresh": (now_dt - datetime.fromisoformat(rain_at)).total_seconds() <= RAIN_STALE_SECONDS,
+        "updated_at": datetime.fromisoformat(rain_at).strftime("%Y-%m-%d %H:%M:%S"),
+    }
+    for k in ("rain_value", "rain_raining", "rain_dry_since"):
+        snap.pop(k, None)
     return snap
 
 @app.get("/api/command")
@@ -941,6 +1022,18 @@ async def set_onboarding(req: OnboardingRequest):
 async def receive_sensors(data: SensorData):
     received = {k: v for k, v in data.model_dump().items() if v is not None}
     seen_device(received.pop("device", None))
+    rain = received.pop("rain_sensor", None)           # 빗물 센서는 실내 값과 따로 다룸
+    alias = received.pop("rain", None)
+    rain = normalize_rain(rain if rain is not None else alias)
+    if rain is not None:
+        with state_lock:
+            changed = update_rain(rain, datetime.now(KST))
+            raining = state["rain_raining"]
+        if changed:
+            print(f"[RAIN {now_str()}] 빗물 센서 → {'비 감지' if raining else '그침'} (값 {rain:.2f})")
+            add_event("rain", "빗물 센서가 비를 감지했어요" if raining else "빗물 센서: 비가 그쳤어요", "auto")
+        if not received:
+            return {"ok": True, "received": {"rain_sensor": rain}}
 
     if not received:
         raise HTTPException(400, "보낸 데이터가 비어있음")
@@ -1091,7 +1184,7 @@ def open_kind(reason):
 def close_kind(reason):
     """창문이 닫힌 이유 → rain / wind / outdoor / early / time / manual / timer / None"""
     reason = reason or ""
-    for word, kind in (("강수", "rain"), ("강풍", "wind"), ("대기질", "outdoor"), ("바깥", "outdoor"),
+    for word, kind in (("강수", "rain"), ("빗물", "rain"), ("강풍", "wind"), ("대기질", "outdoor"), ("바깥", "outdoor"),
                        ("충분히", "early"), ("환기 끝", "time"), ("직접", "manual"), ("타이머", "timer")):
         if word in reason:
             return kind

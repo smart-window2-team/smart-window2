@@ -844,10 +844,12 @@ function airVerdict(s, indoorOk){
   if(s.refreshing) return { tone:'none', icon:'pin', title:'새 위치의 공기 정보를 불러오고 있어요', sub:'' };
   if(!w || !a) return { tone:'none', icon:'alert', title:'바깥 정보를 받지 못했어요', sub:'곧 다시 시도할게요 · 그동안 창문은 닫아 둬요' };
 
-  if(w.precipitation_code){
+  const sensorRain = !!(s.rain_sensor && s.rain_sensor.raining);
+  if(w.precipitation_code || sensorRain){
     const snow = w.precipitation === 'snow';
+    const close = auto ? '그칠 때까지 창문을 닫아 둘게요' : '창문을 닫아 두는 게 좋아요';
     return { tone:'rain', icon: snow ? 'snow' : 'rain', title: snow ? '지금 눈이 와요' : '지금 비가 와요',
-             sub: auto ? '그칠 때까지 창문을 닫아 둘게요' : '창문을 닫아 두는 게 좋아요' };
+             sub: (sensorRain && !w.precipitation_code ? '빗물 센서가 비를 감지했어요 · ' : '') + close };
   }
   // 바람: 판단은 '지금 값과 1시간 안 예보 중 가장 센 값', 화면 숫자는 지금 값 → 차이가 나면 이유를 밝힘
   const windNow = w.wind_speed;
@@ -942,7 +944,9 @@ function renderAir(s, conn){
   $('sv_ihum').innerHTML = num(i.humidity, 0, '%');
 
   // ③ 바깥 날씨: 기온·습도·바람 (실내 센서와 같은 자리에 놓아 비교하기 쉽게)
+  const sensorRain = !!(s.rain_sensor && s.rain_sensor.raining);
   $('weatherState').innerHTML = s.refreshing ? '불러오는 중…'
+    : sensorRain && !w.precipitation_code ? `${icon('rain')}비 (빗물 센서)`
     : has(w.temperature) ? `${icon(weatherIconName(w))}${skyOrPrec(w)}` : '불러오지 못했어요';
   $('sv_otemp').innerHTML = num(w.temperature, 1, '°C');
   $('sv_ohum').innerHTML = num(w.humidity, 0, '%');
@@ -967,7 +971,7 @@ const RAIN_WORD = { rain:'비', drizzle:'비', rain_snow:'비나 눈', sleet:'�
 
 function renderRain(s){
   const r = s.rain_outlook;
-  const rainingNow = !!(s.weather && s.weather.precipitation_code);
+  const rainingNow = !!((s.weather && s.weather.precipitation_code) || (s.rain_sensor && s.rain_sensor.raining));
   $('rainCard').hidden = !r || rainingNow;
   if(!r || rainingNow) return;
   const today = (s.server_time || '').split(' ')[0];
@@ -991,6 +995,13 @@ function renderSource(s){
   $('dataSource').innerHTML = `${at}기상청 · 에어코리아 <svg class="ic ic-xs"><use href="#i-chevron"/></svg>`;
 }
 
+// 빗물 센서 상태 한 줄: "완전 건조 (0.97)" / "비 감지 · 일반 비 (0.42)" / "연결 끊김"
+function rainSensorText(r){
+  if(!r) return '연결 안 됨';
+  if(!r.fresh) return `연결 끊김 · ${timeOf(r.updated_at)}까지 받음`;
+  return `${r.raining ? '비 감지 · ' : ''}${r.level} (${fmt(r.value, 2)})`;
+}
+
 function openDetail(type){
   const body = $('detailBody');
   const title = $('detailTitle');
@@ -1004,7 +1015,8 @@ function openDetail(type){
       row('바람', windSentence(w) || '-') +
       row('풍속', `${fmt(w.wind_speed)}m/s`, gradeWind(w.wind_speed)) +
       row('하늘', mapSky(w.sky)) +
-      row('강수', mapPrec(w.precipitation));
+      row('강수', mapPrec(w.precipitation)) +
+      row('빗물 센서', rainSensorText(lastState.rain_sensor));
   }
   else if(type === 'air'){
     title.textContent = '바깥 공기';
@@ -1675,7 +1687,7 @@ const EVENT_WINDOW = {
   half:   { title:'창문 반쯤 열림', cls:'half' },
   closed: { title:'창문 닫힘',      cls:'closed' },
 };
-const EVENT_KIND = { timer:'타이머', mode:'모드 변경', location:'위치 변경', schedule:'정기 환기', device:'기기 연결' };
+const EVENT_KIND = { timer:'타이머', mode:'모드 변경', location:'위치 변경', schedule:'정기 환기', device:'기기 연결', rain:'빗물 센서' };
 const SOURCE_SHORT = { auto:'자동', manual:'직접', timer:'타이머', system:'시스템' };
 
 // 오늘이면 "15:32", 아니면 "9/21 15:32"
