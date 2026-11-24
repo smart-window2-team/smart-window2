@@ -848,6 +848,11 @@ function airVerdict(s, indoorOk){
   if(w.precipitation_code || sensorRain){
     const snow = w.precipitation === 'snow';
     const close = auto ? '그칠 때까지 창문을 닫아 둘게요' : '창문을 닫아 두는 게 좋아요';
+    const drying = sensorRain && !w.precipitation_code && has(s.rain_sensor.clear_left);
+    if(drying){
+      return { tone:'rain', icon:'rain', title:'비가 그친 것 같아요',
+               sub: `빗물 센서가 마르는 중이에요 · 약 ${Math.max(1, Math.ceil(s.rain_sensor.clear_left / 60))}분 뒤 다시 열 수 있어요` };
+    }
     return { tone:'rain', icon: snow ? 'snow' : 'rain', title: snow ? '지금 눈이 와요' : '지금 비가 와요',
              sub: (sensorRain && !w.precipitation_code ? '빗물 센서가 비를 감지했어요 · ' : '') + close };
   }
@@ -995,10 +1000,23 @@ function renderSource(s){
   $('dataSource').innerHTML = `${at}기상청 · 에어코리아 <svg class="ic ic-xs"><use href="#i-chevron"/></svg>`;
 }
 
+// 실내 미세먼지: 1분 평균(크게) + 순간값(작게) "18㎍/㎥ · 순간 25"
+function pmAvgRaw(i, key){
+  if(!has(i[key])) return '-';
+  const raw = i[`${key}_raw`];
+  return `${fmt(i[key], 0)}㎍/㎥` + (has(raw) ? `<span class="raw-val">순간 ${fmt(raw, 0)}</span>` : '');
+}
+const PM_AVG_NOTE = `<p class="detail-note">실내 미세먼지는 센서 값이 순간적으로 크게 흔들려서(센서 오차 ±10㎍/㎥),
+  화면 표시와 창문 판단 모두 <b>최근 1분 평균</b>을 써요. 옆의 작은 숫자는 방금 받은 순간값이에요.</p>`;
+
 // 빗물 센서 상태 한 줄: "완전 건조 (0.97)" / "비 감지 · 일반 비 (0.42)" / "연결 끊김"
 function rainSensorText(r){
   if(!r) return '연결 안 됨';
   if(!r.fresh) return `연결 끊김 · ${timeOf(r.updated_at)}까지 받음`;
+  if(r.fault) return `연결을 확인해 주세요 (${fmt(r.value, 2)}) · 비 판단에 안 써요`;
+  if(r.raining && has(r.clear_left)){
+    return `마르는 중 · ${r.level} (${fmt(r.value, 2)}) · 약 ${Math.max(1, Math.ceil(r.clear_left / 60))}분 뒤 해제`;
+  }
   return `${r.raining ? '비 감지 · ' : ''}${r.level} (${fmt(r.value, 2)})`;
 }
 
@@ -1034,11 +1052,11 @@ function openDetail(type){
     const pm = v => has(v) ? `${fmt(v, 0)}㎍/㎥` : '-';
     body.innerHTML =
       row('바깥 초미세먼지', pm(a.pm25), gradePM25(a.pm25)) +
-      row('실내 초미세먼지', pm(i.pm25), gradePM25(i.pm25)) +
+      row('실내 초미세먼지', pmAvgRaw(i, 'pm25'), gradePM25(i.pm25)) +
       row('바깥 미세먼지', pm(a.pm10), gradePM10(a.pm10)) +
-      row('실내 미세먼지', pm(i.pm10), gradePM10(i.pm10)) +
+      row('실내 미세먼지', pmAvgRaw(i, 'pm10'), gradePM10(i.pm10)) +
       `<p class="detail-note">초미세먼지(PM2.5)는 지름 2.5㎛ 이하의 아주 작은 먼지로, 미세먼지(PM10)보다 폐 깊숙이 들어가요.
-       등급은 환경부 기준이에요. 실내가 바깥보다 확실히 탁하면 창문을 열어 환기해요.</p>`;
+       등급은 환경부 기준이에요. 실내가 바깥보다 확실히 탁하면 창문을 열어 환기해요.</p>${PM_AVG_NOTE}`;
   }
   else if(type === 'source'){
     title.textContent = '정보 출처';
@@ -1061,11 +1079,11 @@ function openDetail(type){
     } else {
       body.innerHTML =
         row('이산화탄소 (CO₂)', has(i.co2) ? `${fmt(i.co2, 0)}ppm` : '-', gradeCO2(i.co2)) +
-        row('초미세먼지 (PM2.5)', has(i.pm25) ? `${fmt(i.pm25, 0)}㎍/㎥` : '-', gradePM25(i.pm25)) +
-        row('미세먼지 (PM10)', has(i.pm10) ? `${fmt(i.pm10, 0)}㎍/㎥` : '-', gradePM10(i.pm10)) +
+        row('초미세먼지 (PM2.5)', pmAvgRaw(i, 'pm25'), gradePM25(i.pm25)) +
+        row('미세먼지 (PM10)', pmAvgRaw(i, 'pm10'), gradePM10(i.pm10)) +
         row('기온', has(i.temperature) ? `${fmt(i.temperature, 1)}°C` : '-') +
         row('습도', has(i.humidity) ? `${fmt(i.humidity, 0)}%` : '-') +
-        row('측정 시각', i.updated_at || '-');
+        row('측정 시각', i.updated_at || '-') + PM_AVG_NOTE;
     }
   }
 

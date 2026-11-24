@@ -108,6 +108,7 @@ state = {
     "rain_updated_at": None,     # 그 값을 받은 시각 (ISO)
     "rain_raining": False,       # 빗물 센서로 본 '지금 비가 옴'
     "rain_dry_since": None,      # 비로 판단한 뒤 마르기 시작한 시각 (ISO)
+    "rain_fault": False,         # 값이 0 에 붙어 있음 → 센서 선이 빠진 것으로 보고 판단에 안 씀
     # ── 바깥 값 받기 ──
     "refreshing": False,         # 위치를 바꿔서 새 위치의 값을 받는 중
     "rain_outlook": None,        # 앞으로 48시간 비 소식 (단기예보, 화면 표시용)
@@ -139,7 +140,11 @@ RAIN_DRY_FROM = 0.80              # 이 이상이면 '마름' (이슬·습기 �
 RAIN_CONFIRM_SECONDS = 30         # 최근 이 시간 동안의 값 중
 RAIN_CONFIRM_RATIO = 0.8          #   이 비율 이상이 젖음이면 '비' (한 방울·잠깐 튄 물은 걸러짐)
 RAIN_CLEAR_SECONDS = 10 * 60      # 비로 판단한 뒤에는 이 시간 동안 계속 말라 있어야 '그침'
+RAIN_BONE_DRY = 0.95              # 이 이상(완전 건조)이 계속되면
+RAIN_CLEAR_FAST_SECONDS = 2 * 60  #   이 시간만 지나도 '그침' (판을 닦았거나 잘못 감지한 경우)
 RAIN_STALE_SECONDS = 60           # 빗물 센서 값이 이보다 오래됐으면 판단에 쓰지 않음
+RAIN_FAULT_BELOW = 0.02           # 이 미만은 비가 아니라 '선 빠짐' (빈 입력은 0V 로 읽혀 폭우처럼 보임)
+PM_AVG_SECONDS = 60               # 실내 미세먼지는 최근 이 시간 값의 평균으로 보여 주고 판단 (PMS7003 저농도 오차 ±10㎍/㎥)
 RAIN_LEVELS = ((0.95, "완전 건조"), (0.80, "이슬·습기"), (0.55, "보슬비"), (0.25, "일반 비"), (0.0, "폭우·물 고임"))
 
 VENT_SCHEDULE = ("10:00", "15:00", "20:00")   # 정기 환기 기본 시각 (하루 3번) — 사용자가 정하지 않았을 때
@@ -181,6 +186,25 @@ def indoor_dirtier(indoor, air):
 
 
 rain_samples = deque(maxlen=240)   # 최근 빗물 센서 값 [(시각, 값)] (state_lock 안에서 다룸)
+pm_samples = deque(maxlen=240)     # 최근 실내 미세먼지 순간값 [(시각, {"pm25", "pm10"})] (state_lock 안에서 다룸)
+
+
+def smooth_pm(received, now_dt):
+    """실내 미세먼지 순간값 → 최근 1분 이동 평균 (state_lock 을 잡은 채로 호출)
+    값이 올 때마다(5초) 다시 계산하므로 화면은 5초마다 바뀌되 크게 튀지 않음.
+    돌려주는 값: {"pm25": 평균, "pm10": 평균, "pm25_raw": 순간값, "pm10_raw": 순간값} (받은 항목만)"""
+    raw = {k: received[k] for k in ("pm25", "pm10") if k in received}
+    if not raw:
+        return {}
+    pm_samples.append((now_dt, raw))
+    while pm_samples and (now_dt - pm_samples[0][0]).total_seconds() > PM_AVG_SECONDS:
+        pm_samples.popleft()
+    out = {}
+    for k, v in raw.items():
+        vals = [s[k] for _, s in pm_samples if k in s]
+        out[k] = round(sum(vals) / len(vals), 1)
+        out[f"{k}_raw"] = v
+    return out
 
 
 def normalize_rain(value):
@@ -200,10 +224,19 @@ def rain_level(value):
 def update_rain(value, now_dt):
     """빗물 센서 값 하나 반영 (state_lock 을 잡은 채로 호출). 비/그침이 바뀌면 True
     - 비: 최근 30초 값의 80% 이상이 젖음(0.55 미만)이고, 20초 이상 쌓였을 때 → 한 방울은 걸러짐
-    - 그침: 비로 판단한 뒤 10분 동안 계속 마름(0.80 이상)"""
-    rain_samples.append((now_dt, value))
+    - 그침: 비로 판단한 뒤 10분 동안 계속 마름(0.80 이상)
+    - 0.02 미만: 선이 빠진 것(센서 이상)으로 보고 비 판단을 멈춤"""
     state["rain_value"] = value
     state["rain_updated_at"] = now_dt.isoformat()
+    if value < RAIN_FAULT_BELOW:
+        was = state["rain_raining"]
+        state["rain_fault"] = True
+        state["rain_raining"] = False
+        state["rain_dry_since"] = None
+        rain_samples.clear()                           # 다시 연결되면 처음부터 30초 확인
+        return was
+    state["rain_fault"] = False
+    rain_samples.append((now_dt, value))
     recent = [(t, v) for t, v in rain_samples if (now_dt - t).total_seconds() <= RAIN_CONFIRM_SECONDS]
     was = state["rain_raining"]
     if not was:
@@ -215,12 +248,20 @@ def update_rain(value, now_dt):
     elif value >= RAIN_DRY_FROM:
         since = datetime.fromisoformat(state["rain_dry_since"]) if state["rain_dry_since"] else now_dt
         state["rain_dry_since"] = since.isoformat()
-        if (now_dt - since).total_seconds() >= RAIN_CLEAR_SECONDS:
+        if rain_clear_left(since, now_dt) <= 0:
             state["rain_raining"] = False
             state["rain_dry_since"] = None
     else:
         state["rain_dry_since"] = None                 # 다시 젖음 → 마른 시간 처음부터
     return state["rain_raining"] != was
+
+
+def rain_clear_left(dry_since, now_dt):
+    """비로 판단한 뒤 마르기 시작했을 때, '그침'까지 남은 초 (state_lock 안에서 호출)
+    마른 뒤 계속 완전 건조(0.95 이상)였으면 2분, 아니면(축축함 0.80~0.94 포함) 10분"""
+    dry = [v for t, v in rain_samples if t >= dry_since]
+    need = RAIN_CLEAR_FAST_SECONDS if dry and min(dry) >= RAIN_BONE_DRY else RAIN_CLEAR_SECONDS
+    return max(0, need - (now_dt - dry_since).total_seconds())
 
 
 def rain_sensor_on(snap, now_dt):
@@ -900,12 +941,18 @@ async def get_status():
     snap.pop("devices", None)                                                    # 기기 목록은 /api/devices 에서
     rain_at = snap.pop("rain_updated_at", None)
     snap["rain_sensor"] = None if rain_at is None else {                         # 빗물 센서 (값을 받은 적이 있을 때)
-        "value": snap.get("rain_value"), "level": rain_level(snap.get("rain_value")),
+        "value": snap.get("rain_value"),
+        "level": "연결 확인 필요" if snap.get("rain_fault") else rain_level(snap.get("rain_value")),
+        "fault": bool(snap.get("rain_fault")),
+        "clear_left": None,                                                      # 마르는 중이면 '그침'까지 남은 초
         "raining": ctx["rain_sensor"],
         "fresh": (now_dt - datetime.fromisoformat(rain_at)).total_seconds() <= RAIN_STALE_SECONDS,
         "updated_at": datetime.fromisoformat(rain_at).strftime("%Y-%m-%d %H:%M:%S"),
     }
-    for k in ("rain_value", "rain_raining", "rain_dry_since"):
+    if snap["rain_sensor"] and snap.get("rain_raining") and snap.get("rain_dry_since"):
+        with state_lock:
+            snap["rain_sensor"]["clear_left"] = round(rain_clear_left(datetime.fromisoformat(snap["rain_dry_since"]), now_dt))
+    for k in ("rain_value", "rain_raining", "rain_dry_since", "rain_fault"):
         snap.pop(k, None)
     return snap
 
@@ -1027,9 +1074,13 @@ async def receive_sensors(data: SensorData):
     rain = normalize_rain(rain if rain is not None else alias)
     if rain is not None:
         with state_lock:
+            was_fault = state["rain_fault"]
             changed = update_rain(rain, datetime.now(KST))
-            raining = state["rain_raining"]
-        if changed:
+            raining, fault = state["rain_raining"], state["rain_fault"]
+        if fault != was_fault:
+            print(f"[RAIN {now_str()}] 빗물 센서 {'연결 이상 (값 ' + format(rain, '.2f') + ')' if fault else '다시 정상'}")
+            add_event("rain", "빗물 센서 연결을 확인해 주세요" if fault else "빗물 센서가 다시 정상이에요", "auto")
+        if changed and not fault:
             print(f"[RAIN {now_str()}] 빗물 센서 → {'비 감지' if raining else '그침'} (값 {rain:.2f})")
             add_event("rain", "빗물 센서가 비를 감지했어요" if raining else "빗물 센서: 비가 그쳤어요", "auto")
         if not received:
@@ -1041,6 +1092,7 @@ async def receive_sensors(data: SensorData):
     with state_lock:
         current = state.get("indoor") or {}
         current.update(received)
+        current.update(smooth_pm(received, datetime.now(KST)))   # 미세먼지는 1분 평균 (순간값은 *_raw)
         current["updated_at"] = now_str()
         state["indoor"] = current
         snapshot = dict(current)

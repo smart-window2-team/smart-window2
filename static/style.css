@@ -859,6 +859,7 @@ button:focus-visible {
 .stat-sub:empty { display: none; }
 .stat-card.stale .stat-grid { opacity: .45; }
 
+.raw-val { margin-left: 6px; color: var(--muted); font-size: 0.78rem; font-weight: 500; }
 .detail-note { margin: 14px 0 0; color: var(--muted); font-size: 0.82rem; line-height: 1.6; }
 
 .rain-card { padding: 20px 22px; }
