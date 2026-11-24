@@ -1876,7 +1876,22 @@ const METRICS = {
 };
 const INDOOR_GAP_MS = 5 * 60 * 1000;    // 실내 로그는 1분 간격 → 5분 넘게 비면 선을 끊음
 const OUTDOOR_GAP_MS = 25 * 60 * 1000;  // 바깥 로그는 10분 간격
-const CHART_BUCKET_MIN = 5;             // 점 하나 = 5분 평균 (저장은 1분, 그릴 때만 평균)
+const HOUR_MS = 3600 * 1000;
+const RANGE_PAD_MS = 15 * 60000;          // 기록 앞뒤로 남길 여백
+// 보여 주는 길이에 따라 점 하나로 묶는 시간(분)과 눈금 간격(분): 길수록 넓게 묶어 점 개수를 비슷하게
+const CHART_BUCKETS = [[2 * HOUR_MS, 5], [6 * HOUR_MS, 10], [Infinity, 20]];
+const CHART_TICKS = [[HOUR_MS, 10], [2 * HOUR_MS, 15], [4 * HOUR_MS, 30], [8 * HOUR_MS, 60], [14 * HOUR_MS, 120], [Infinity, 180]];
+const pickBy = (table, span) => table.find(([limit]) => span <= limit)[1];
+
+// 가로축 범위: 하루 전체가 아니라 '기록이 있는 시간'에 맞춤 (앞뒤 15분 여백, 15분 단위로 맞춤, 하루 범위를 넘지 않음)
+function chartRange(logs, metric, dayStart, dayEnd){
+  const times = logs.filter(l => has((l.indoor || {})[metric])).map(l => tsMs(l.timestamp));
+  if(!times.length) return { from: dayStart, to: dayEnd, first: null };
+  const q = RANGE_PAD_MS;
+  const from = Math.max(dayStart, Math.floor((Math.min(...times) - q) / q) * q);
+  const to = Math.min(dayEnd, Math.ceil((Math.max(...times) + q) / q) * q);
+  return { from, to: Math.max(to, Math.min(dayEnd, from + HOUR_MS)), first: Math.min(...times) };
+}
 const OPEN_BAND_COLOR = 'rgba(49, 130, 246, .26)';
 const INDOOR_KEYS = ['co2', 'pm25', 'pm10', 'temperature', 'humidity'];
 const BAND_COLORS = {
@@ -2135,13 +2150,18 @@ async function loadChart(animate=false){
     const airLogs = airRes ? (airRes.logs || []) : [];
     $('chartDesc').textContent = m.desc;
     $('seriesLegend').hidden = !m.outdoor;
-    $('bucketNote').hidden = false;
-    $('bucketNote').textContent = `점 하나는 ${CHART_BUCKET_MIN}분 평균`;
     renderChartNow(lastState.indoor);
 
     const nowMs = has(lastState.server_time) ? tsMs(lastState.server_time) : Date.now();
-    const xMin = tsMs(res.start);
-    const xMax = res.end ? tsMs(res.end) : nowMs;
+    const dayStart = tsMs(res.start);
+    const dayEnd = res.end ? tsMs(res.end) : nowMs;
+    const range = chartRange(logs, metric, dayStart, dayEnd);
+    const xMin = range.from, xMax = range.to;
+    const spanMs = xMax - xMin;
+    const bucketMin = pickBy(CHART_BUCKETS, spanMs);
+    $('bucketNote').hidden = false;
+    $('bucketNote').textContent = (range.first && xMin > dayStart ? `${hhmm(range.first)}부터 기록 · ` : '')
+      + `점 하나는 ${bucketMin}분 평균`;
     const spans = (spanRes.spans || []).map(s => ({ from: tsMs(s.start), to: s.end ? tsMs(s.end) : xMax }));
 
     if(logs.length === 0 && airLogs.length === 0){
@@ -2153,7 +2173,7 @@ async function loadChart(animate=false){
     $('chartEmpty').hidden = true;
 
     // 데이터: {x: 시각(ms), y: 값}
-    const bucketMs = CHART_BUCKET_MIN * 60000;
+    const bucketMs = bucketMin * 60000;
     const indoorPts = bucketLogs(logs, bucketMs, nowMs).map(p => ({ ...p, y: has(p.indoor[metric]) ? p.indoor[metric] : null }));
     const outdoorPts = airLogs.filter(l => has(l[metric])).map(l => ({ x: tsMs(l.timestamp), y: l[metric] }));
     const known = [...indoorPts, ...outdoorPts].map(p => p.y).filter(has);
@@ -2174,7 +2194,7 @@ async function loadChart(animate=false){
       pointBackgroundColor: '#3182F6',
       borderWidth: 2.5,
       tension: 0.3,
-      pointRadius: indoorPts.length <= 24 ? 3 : 0,
+      pointRadius: indoorPts.length <= 40 ? 2.5 : 0,
       pointHoverRadius: 5,
       spanGaps: bucketMs * 1.5,          // 구간이 통째로 비면 선을 끊음
       fill: false,
@@ -2196,7 +2216,7 @@ async function loadChart(animate=false){
     }
 
     // 눈금: 보여 주는 기간이 6시간 이하면 1시간, 그보다 길면 3시간 간격 (정각)
-    const tickStep = (xMax - xMin <= 6 * 3600 * 1000 ? 60 : 180) * 60000;
+    const tickStep = pickBy(CHART_TICKS, spanMs) * 60000;
 
     if(indoorChart) indoorChart.destroy();
 
